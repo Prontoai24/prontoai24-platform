@@ -4,7 +4,15 @@ export const dynamic = 'force-dynamic'
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { Check, KeyRound, LockKeyhole } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+
+const passwordRules = [
+  { label: 'Almeno 8 caratteri', test: (value: string) => value.length >= 8 },
+  { label: 'Una lettera maiuscola', test: (value: string) => /[A-Z]/.test(value) },
+  { label: 'Un numero', test: (value: string) => /[0-9]/.test(value) },
+  { label: 'Un carattere speciale', test: (value: string) => /[^A-Za-z0-9]/.test(value) },
+]
 
 export default function CambioPasswordObbligatorio() {
   const [nuovaPassword, setNuovaPassword] = useState('')
@@ -13,12 +21,12 @@ export default function CambioPasswordObbligatorio() {
   const [caricamento, setCaricamento] = useState(false)
   const router = useRouter()
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
     setErrore(null)
 
-    if (nuovaPassword.length < 8) {
-      setErrore('La password deve avere almeno 8 caratteri.')
+    if (!passwordRules.every(({ test }) => test(nuovaPassword))) {
+      setErrore('La password non rispetta tutti i requisiti di sicurezza.')
       return
     }
     if (nuovaPassword !== conferma) {
@@ -27,55 +35,48 @@ export default function CambioPasswordObbligatorio() {
     }
 
     setCaricamento(true)
-
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
-    const { error: erroreUpdate } = await supabase.auth.updateUser({ password: nuovaPassword })
+    const { error: updateError } = await supabase.auth.updateUser({ password: nuovaPassword })
 
-    if (erroreUpdate) {
-      setErrore(erroreUpdate.message)
+    if (updateError) {
+      setErrore(updateError.message)
       setCaricamento(false)
       return
     }
 
-    // Rimuove l'obbligo di cambio password
     if (user) {
-      await supabase.from('profiles').update({ must_change_password: false }).eq('id', user.id)
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({ must_change_password: false })
+        .eq('id', user.id)
+      if (profileError) {
+        setErrore('Password aggiornata, ma non è stato possibile completare il profilo. Riprova tra poco.')
+        setCaricamento(false)
+        return
+      }
     }
 
+    router.push('/admin')
     router.refresh()
   }
 
   return (
-    <div style={{ maxWidth: 400, margin: '80px auto', fontFamily: 'sans-serif' }}>
-      <h1>Imposta una nuova password</h1>
-      <p>Per motivi di sicurezza devi cambiare la password temporanea prima di continuare.</p>
-      <form onSubmit={handleSubmit}>
-        <div style={{ marginBottom: 12 }}>
-          <label>Nuova password</label>
-          <input
-            type="password"
-            value={nuovaPassword}
-            onChange={(e) => setNuovaPassword(e.target.value)}
-            required
-            style={{ width: '100%', padding: 8 }}
-          />
-        </div>
-        <div style={{ marginBottom: 12 }}>
-          <label>Conferma password</label>
-          <input
-            type="password"
-            value={conferma}
-            onChange={(e) => setConferma(e.target.value)}
-            required
-            style={{ width: '100%', padding: 8 }}
-          />
-        </div>
-        {errore && <p style={{ color: 'red' }}>{errore}</p>}
-        <button type="submit" disabled={caricamento} style={{ width: '100%', padding: 10 }}>
-          {caricamento ? 'Salvataggio…' : 'Imposta password e continua'}
-        </button>
-      </form>
-    </div>
+    <main className="grid-paper flex min-h-screen items-center justify-center px-6 py-12">
+      <section className="w-full max-w-lg rounded-[30px] border border-[var(--line)] bg-white p-7 shadow-xl shadow-[#0b6e9e]/10 sm:p-10">
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#e5f8f6] text-[var(--blue)]"><LockKeyhole size={23} /></div>
+        <p className="mt-7 text-xs font-bold uppercase tracking-[.18em] text-[var(--blue)]">Primo accesso</p>
+        <h1 className="mt-3 text-3xl font-bold text-[var(--ink)]">Imposta una nuova password</h1>
+        <p className="mt-4 leading-7 text-[var(--muted)]">Per proteggere il tuo account devi sostituire la password temporanea prima di accedere alla dashboard Admin.</p>
+
+        <form onSubmit={handleSubmit} className="mt-8 space-y-5">
+          <label className="block text-sm font-semibold text-[var(--ink)]">Nuova password<input type="password" value={nuovaPassword} onChange={(event) => setNuovaPassword(event.target.value)} required autoComplete="new-password" className="mt-2 w-full rounded-2xl border border-[var(--line)] px-4 py-3 outline-none transition focus:border-[var(--cyan)] focus:ring-2 focus:ring-[var(--cyan)]/20" /></label>
+          <label className="block text-sm font-semibold text-[var(--ink)]">Conferma nuova password<input type="password" value={conferma} onChange={(event) => setConferma(event.target.value)} required autoComplete="new-password" className="mt-2 w-full rounded-2xl border border-[var(--line)] px-4 py-3 outline-none transition focus:border-[var(--cyan)] focus:ring-2 focus:ring-[var(--cyan)]/20" /></label>
+          <div className="rounded-2xl bg-[var(--paper)] p-4"><p className="flex items-center gap-2 text-sm font-bold text-[var(--ink)]"><KeyRound size={16} className="text-[var(--blue)]" /> Requisiti di sicurezza</p><ul className="mt-3 grid gap-2 text-sm text-[var(--muted)] sm:grid-cols-2">{passwordRules.map(({ label, test }) => <li key={label} className="flex items-center gap-2"><Check size={15} className={test(nuovaPassword) ? 'text-[#5b9b27]' : 'text-[var(--line)]'} />{label}</li>)}</ul></div>
+          {errore && <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{errore}</p>}
+          <button type="submit" disabled={caricamento} className="btn-primary w-full rounded-full bg-[var(--ink)] px-5 py-3.5 font-bold text-white disabled:cursor-not-allowed disabled:opacity-60">{caricamento ? 'Salvataggio…' : 'Salva password e accedi'}</button>
+        </form>
+      </section>
+    </main>
   )
 }

@@ -1,0 +1,28 @@
+-- ProntoAI24 — Seed Super Admin
+--
+-- L'utente Auth deve essere creato in modo server-side con il service role.
+-- Questo script completa/riporta il profilo applicativo in stato di primo accesso.
+-- La password temporanea NON viene mai salvata nel database.
+--
+-- Procedura:
+-- 1. Creare l'utente con auth.admin.createUser({ email, password, email_confirm: true }).
+-- 2. Usare l'UUID restituito come :super_admin_id nella INSERT sottostante.
+-- 3. Inviare la password temporanea via canale sicuro/Resend.
+
+-- Esempio server-side (non eseguire in SQL Editor):
+-- const { data } = await supabaseAdmin.auth.admin.createUser({
+--   email: 'it-admin@prontoai24.it',
+--   password: passwordTemporanea,
+--   email_confirm: true,
+--   user_metadata: { role: 'super_admin', must_change_password: true },
+-- })
+
+-- Sostituire :super_admin_id con l'UUID restituito da Supabase Auth.
+-- insert into public.profiles (id, role, full_name, email, must_change_password)
+-- values (':super_admin_id', 'super_admin', 'ProntoAI24 Super Admin', 'it-admin@prontoai24.it', true)
+-- on conflict (id) do update set
+--   role = excluded.role,
+--   full_name = excluded.full_name,
+--   email = excluded.email,
+--   must_change_password = true,
+--   updated_at = now();
