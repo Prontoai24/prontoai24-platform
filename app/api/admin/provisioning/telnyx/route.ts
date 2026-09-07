@@ -45,12 +45,15 @@ export async function POST(request: Request) {
     const resolvedMessagingProfileId = messagingProfileId || process.env.TELNYX_MESSAGING_PROFILE_ID
     const result = await telnyx('/number_orders', { method: 'POST', body: JSON.stringify({ phone_numbers: phoneNumbers.map((phoneNumber: string) => ({ phone_number: phoneNumber, ...(requirementGroupId ? { requirement_group_id: requirementGroupId } : {}) })), ...(resolvedConnectionId ? { connection_id: resolvedConnectionId } : {}), ...(resolvedMessagingProfileId ? { messaging_profile_id: resolvedMessagingProfileId } : {}) }) })
     const order = result.data || result
+    let phoneRecords: unknown[] = []
     if (clientId) {
       const admin = createAdminClient()
       const rows = phoneNumbers.map((phoneNumber: string) => ({ client_id: clientId, phone_number: phoneNumber, telnyx_order_id: order.id || null, requirement_group_id: requirementGroupId || null, messaging_profile_id: resolvedMessagingProfileId || null, compliance_status: 'pending', status: 'pending', status_updated_at: new Date().toISOString() }))
       const { error } = await admin.from('phone_numbers').upsert(rows, { onConflict: 'id' })
       if (error) return NextResponse.json({ error: `Ordine Telnyx creato ma salvataggio locale fallito: ${error.message}`, order }, { status: 500 })
+      const { data } = await admin.from('phone_numbers').select('id, phone_number, telnyx_order_id, requirement_group_id, messaging_profile_id, status').eq('client_id', clientId).eq('telnyx_order_id', order.id || '')
+      phoneRecords = data || []
     }
-    return NextResponse.json({ success: true, order })
+    return NextResponse.json({ success: true, order, phoneRecords })
   } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : 'Ordine Telnyx fallito' }, { status: 502 }) }
 }

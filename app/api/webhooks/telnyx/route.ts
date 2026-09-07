@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
+import { sendTransactionalSms } from '@/lib/telnyx/sms'
 
 export const dynamic = 'force-dynamic'
 
@@ -54,6 +55,21 @@ export async function POST(request: Request) {
   else if (requirementGroupId) query = query.eq('requirement_group_id', requirementGroupId)
   else query = null as any
   if (query) await query
+
+  if (status && (updates.status === 'active' || updates.compliance_status === 'approved')) {
+    const lookup = admin.from('phone_numbers').select('client_id, phone_number').eq(numberId ? 'telnyx_number_id' : orderId ? 'telnyx_order_id' : 'requirement_group_id', numberId || orderId || requirementGroupId).limit(1).maybeSingle()
+    const { data: assignedPhone } = await lookup
+    if (assignedPhone?.client_id) {
+      const { data: client } = await admin.from('clients').select('contact_phone, company_name').eq('id', assignedPhone.client_id).single()
+      const smsText = `ProntoAI24: la numerazione ${assignedPhone.phone_number} di ${client?.company_name || 'la tua azienda'} è stata attivata.`
+      if (client?.contact_phone) {
+        const { data: alreadySent } = await admin.from('sms_messages').select('id').eq('client_id', assignedPhone.client_id).eq('to_number', client.contact_phone).eq('body', smsText).limit(1).maybeSingle()
+        if (!alreadySent) {
+          try { await sendTransactionalSms({ clientId: assignedPhone.client_id, toNumber: client.contact_phone, body: smsText }) } catch (error) { console.error('Telnyx activation SMS failed', error) }
+        }
+      }
+    }
+  }
 
   await admin.from('audit_logs').insert({ action: 'telnyx.webhook.received', entity_type: 'telnyx', entity_id: null, metadata: { eventType, orderId, numberId, requirementGroupId, status, eventId: payload.id || data.id || null } })
   return NextResponse.json({ received: true, eventType, orderId, numberId, requirementGroupId })
