@@ -29,14 +29,20 @@ export async function sendTransactionalSms(input: SendTransactionalSmsInput) {
   if (queueError) throw new Error(`Registrazione SMS non riuscita: ${queueError.message}`)
 
   try {
-    const key = process.env.TELNYX_API_KEY
-    if (!key) throw new Error('TELNYX_API_KEY non configurata')
-    const response = await fetch('https://api.telnyx.com/v2/messages', { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: fromNumber, to: input.toNumber, text: input.body, messaging_profile_id: messagingProfileId }), cache: 'no-store' })
-    const body = await response.json().catch(() => ({}))
-    if (!response.ok) throw new Error(body?.errors?.[0]?.detail || body?.error || `Telnyx ${response.status}`)
-    const message = body.data || body
-    await admin.from('sms_messages').update({ status: 'sent', provider_message_id: message.id || null, updated_at: new Date().toISOString() }).eq('id', queued.id)
-    return { id: queued.id, providerMessageId: message.id || null, fromNumber, messagingProfileId }
+    let providerMessageId: string | null
+    if (process.env.TELNYX_MOCK_MODE === 'true') {
+      providerMessageId = `mock-sms-${queued.id}`
+    } else {
+      const key = process.env.TELNYX_API_KEY
+      if (!key) throw new Error('TELNYX_API_KEY non configurata')
+      const response = await fetch('https://api.telnyx.com/v2/messages', { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: fromNumber, to: input.toNumber, text: input.body, messaging_profile_id: messagingProfileId }), cache: 'no-store' })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(body?.errors?.[0]?.detail || body?.error || `Telnyx ${response.status}`)
+      const message = body.data || body
+      providerMessageId = message.id || null
+    }
+    await admin.from('sms_messages').update({ status: 'sent', provider_message_id: providerMessageId, updated_at: new Date().toISOString() }).eq('id', queued.id)
+    return { id: queued.id, providerMessageId, fromNumber, messagingProfileId, mock: process.env.TELNYX_MOCK_MODE === 'true' }
   } catch (error) {
     await admin.from('sms_messages').update({ status: 'failed', error_message: error instanceof Error ? error.message : 'Invio SMS fallito', updated_at: new Date().toISOString() }).eq('id', queued.id)
     throw error
