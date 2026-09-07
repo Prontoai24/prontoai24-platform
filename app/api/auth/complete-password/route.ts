@@ -4,7 +4,7 @@ import { createClient, createAdminClient } from '@/lib/supabase/server'
 export const dynamic = 'force-dynamic'
 
 function jsonError(error: string, status: number) {
-  return NextResponse.json({ error }, { status, headers: { 'Cache-Control': 'no-store' } })
+  return NextResponse.json({ error, profileCompleted: false }, { status, headers: { 'Cache-Control': 'no-store' } })
 }
 
 export async function POST() {
@@ -15,26 +15,27 @@ export async function POST() {
 
   try {
     const adminClient = createAdminClient()
+    const { data: existingProfile } = await adminClient.from('profiles').select('role, full_name, email, created_by').eq('id', user.id).maybeSingle()
+    const metadataRole = user.user_metadata?.role
+    const role = existingProfile?.role || (metadataRole === 'client' || metadataRole === 'super_admin' ? metadataRole : 'admin')
+    const email = existingProfile?.email || user.email || `${user.id}@invalid.local`
+    const fullName = existingProfile?.full_name || user.user_metadata?.full_name || user.user_metadata?.name || null
+
     const { data: profile, error: profileError } = await adminClient
       .from('profiles')
-      .update({ must_change_password: false, updated_at: new Date().toISOString() })
-      .eq('id', user.id)
-      .select('id, must_change_password')
+      .upsert({ id: user.id, role, full_name: fullName, email, must_change_password: false, created_by: existingProfile?.created_by || null, updated_at: new Date().toISOString() }, { onConflict: 'id' })
+      .select('id, role, email, must_change_password')
       .single()
 
-    if (profileError) {
-      return jsonError(`Impossibile aggiornare il profilo Admin (${profileError.code || 'SUPABASE'}): ${profileError.message}`, 500)
-    }
-    if (!profile || profile.must_change_password !== false) {
-      return jsonError('Il profilo Admin non è stato aggiornato: verifica che esista una riga profiles per l’utente autenticato.', 500)
-    }
+    if (profileError) return jsonError(`Impossibile creare o aggiornare il profilo (${profileError.code || 'SUPABASE'}): ${profileError.message}`, 500)
+    if (!profile || profile.must_change_password !== false) return jsonError('Il profilo non è stato completato correttamente.', 500)
 
     const metadata = { ...(user.user_metadata || {}), must_change_password: false, force_password_change: false }
     const { data: updatedAuth, error: metadataError } = await adminClient.auth.admin.updateUserById(user.id, { user_metadata: metadata })
     if (metadataError) return jsonError(`Profilo aggiornato, ma i metadati Auth non sono stati sincronizzati: ${metadataError.message}`, 500)
     if (!updatedAuth.user) return jsonError('Profilo aggiornato, ma Supabase Auth non ha restituito l’utente aggiornato.', 500)
 
-    return NextResponse.json({ success: true, userId: user.id, mustChangePassword: false }, { headers: { 'Cache-Control': 'no-store' } })
+    return NextResponse.json({ success: true, profileCompleted: true, userId: user.id, mustChangePassword: false }, { headers: { 'Cache-Control': 'no-store' } })
   } catch (error) {
     return jsonError(error instanceof Error ? `Errore server nel completamento profilo: ${error.message}` : 'Errore server nel completamento profilo.', 500)
   }

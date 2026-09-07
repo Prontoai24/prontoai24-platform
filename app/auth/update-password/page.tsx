@@ -42,9 +42,14 @@ export default function CambioPasswordObbligatorio() {
       const { error: updateError } = await supabase.auth.updateUser({ password: nuovaPassword })
       if (updateError) throw new Error(`Supabase non ha aggiornato la password: ${updateError.message}`)
 
-      const completeResponse = await fetch('/api/auth/complete-password', { method: 'POST' })
+      const completeResponse = await fetch('/api/auth/complete-password', { method: 'POST', cache: 'no-store' })
       const completeBody = await completeResponse.json().catch(() => ({}))
-      if (!completeResponse.ok) throw new Error(completeBody.error || 'Password aggiornata, ma completamento profilo non riuscito.')
+      if (!completeResponse.ok || completeBody.profileCompleted !== true) {
+        try { await supabase.auth.signOut() } catch { /* il redirect al login completa comunque il fallback */ }
+        setSuccesso('Password aggiornata con successo! Accedi con la nuova password dopo il reindirizzamento…')
+        window.setTimeout(() => router.replace('/login'), 900)
+        return
+      }
 
       await supabase.auth.getSession()
       setSuccesso('Password aggiornata. Reindirizzamento alla dashboard Admin…')
