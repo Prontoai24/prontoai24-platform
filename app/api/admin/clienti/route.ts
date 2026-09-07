@@ -23,7 +23,7 @@ export async function POST(request: Request) {
   if (!profile || !['admin', 'super_admin'].includes(profile.role)) return NextResponse.json({ error: 'Permessi insufficienti' }, { status: 403 })
 
   const body = await request.json()
-  const { companyName, vatNumber, fiscalCode, contactEmail, contactPhone, billingAddress, status = 'in_setup', managedByAdmin = user.id, planId, sendInvite = true } = body
+  const { companyName, vatNumber, fiscalCode, contactEmail, contactPhone, billingAddress, status = 'in_setup', managedByAdmin = user.id, planId, planType, includedMinutes, billingCycle, monthlyPrice, sendInvite = true } = body
   if (!contactEmail || !companyName) return NextResponse.json({ error: 'companyName e contactEmail sono obbligatori' }, { status: 400 })
   if (profile.role === 'admin' && managedByAdmin !== user.id) return NextResponse.json({ error: 'Un admin può assegnare solo a se stesso' }, { status: 403 })
 
@@ -42,7 +42,10 @@ export async function POST(request: Request) {
   const { data: client, error } = await adminClient.from('clients').insert({ profile_id: profileId, company_name: companyName, vat_number: vatNumber || null, fiscal_code: fiscalCode || null, contact_email: contactEmail, contact_phone: contactPhone || null, billing_address: billingAddress || null, status, managed_by_admin: managedByAdmin }).select('id, company_name, contact_email, status').single()
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
-  if (planId) {
+  if (planType && includedMinutes && billingCycle && monthlyPrice !== undefined) {
+    const { error: subscriptionError } = await adminClient.from('subscriptions').insert({ client_id: client.id, tier: planType, minutes_package: Number(includedMinutes), commitment: billingCycle, monthly_price_cents: Math.round(Number(monthlyPrice) * 100), status: 'in_setup' })
+    if (subscriptionError) return NextResponse.json({ error: subscriptionError.message }, { status: 400 })
+  } else if (planId) {
     const { data: plan } = await adminClient.from('pricing_plans').select('tier, minutes_package, whatsapp_addon_price_cents, chatbot_addon_price_cents').eq('id', planId).single()
     if (plan) await adminClient.from('subscriptions').insert({ client_id: client.id, tier: plan.tier, minutes_package: plan.minutes_package, commitment: 'annuale', whatsapp_addon: plan.whatsapp_addon_price_cents > 0, chatbot_addon: plan.chatbot_addon_price_cents > 0, status: 'in_setup' })
   }
