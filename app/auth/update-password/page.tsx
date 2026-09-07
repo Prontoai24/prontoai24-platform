@@ -18,12 +18,14 @@ export default function CambioPasswordObbligatorio() {
   const [nuovaPassword, setNuovaPassword] = useState('')
   const [conferma, setConferma] = useState('')
   const [errore, setErrore] = useState<string | null>(null)
+  const [successo, setSuccesso] = useState<string | null>(null)
   const [caricamento, setCaricamento] = useState(false)
   const router = useRouter()
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setErrore(null)
+    setSuccesso(null)
 
     if (!passwordRules.every(({ test }) => test(nuovaPassword))) {
       setErrore('La password non rispetta tutti i requisiti di sicurezza.')
@@ -35,30 +37,23 @@ export default function CambioPasswordObbligatorio() {
     }
 
     setCaricamento(true)
-    const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    const { error: updateError } = await supabase.auth.updateUser({ password: nuovaPassword })
+    try {
+      const supabase = createClient()
+      const { error: updateError } = await supabase.auth.updateUser({ password: nuovaPassword })
+      if (updateError) throw new Error(`Supabase non ha aggiornato la password: ${updateError.message}`)
 
-    if (updateError) {
-      setErrore(updateError.message)
+      const completeResponse = await fetch('/api/auth/complete-password', { method: 'POST' })
+      const completeBody = await completeResponse.json().catch(() => ({}))
+      if (!completeResponse.ok) throw new Error(completeBody.error || 'Password aggiornata, ma completamento profilo non riuscito.')
+
+      setSuccesso('Password aggiornata. Reindirizzamento alla dashboard Admin…')
+      router.replace('/admin')
+      router.refresh()
+    } catch (error) {
+      setErrore(error instanceof Error ? error.message : 'Si è verificato un errore durante il salvataggio. Riprova.')
+    } finally {
       setCaricamento(false)
-      return
     }
-
-    if (user) {
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({ must_change_password: false })
-        .eq('id', user.id)
-      if (profileError) {
-        setErrore('Password aggiornata, ma non è stato possibile completare il profilo. Riprova tra poco.')
-        setCaricamento(false)
-        return
-      }
-    }
-
-    router.push('/admin')
-    router.refresh()
   }
 
   return (
@@ -74,6 +69,7 @@ export default function CambioPasswordObbligatorio() {
           <label className="block text-sm font-semibold text-[var(--ink)]">Conferma nuova password<input type="password" value={conferma} onChange={(event) => setConferma(event.target.value)} required autoComplete="new-password" className="mt-2 w-full rounded-2xl border border-[var(--line)] px-4 py-3 outline-none transition focus:border-[var(--cyan)] focus:ring-2 focus:ring-[var(--cyan)]/20" /></label>
           <div className="rounded-2xl bg-[var(--paper)] p-4"><p className="flex items-center gap-2 text-sm font-bold text-[var(--ink)]"><KeyRound size={16} className="text-[var(--blue)]" /> Requisiti di sicurezza</p><ul className="mt-3 grid gap-2 text-sm text-[var(--muted)] sm:grid-cols-2">{passwordRules.map(({ label, test }) => <li key={label} className="flex items-center gap-2"><Check size={15} className={test(nuovaPassword) ? 'text-[#5b9b27]' : 'text-[var(--line)]'} />{label}</li>)}</ul></div>
           {errore && <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{errore}</p>}
+          {successo && <p role="status" className="rounded-xl bg-[#e5f8f6] px-4 py-3 text-sm font-semibold text-[var(--blue)]">{successo}</p>}
           <button type="submit" disabled={caricamento} className="btn-primary w-full rounded-full bg-[var(--ink)] px-5 py-3.5 font-bold text-white disabled:cursor-not-allowed disabled:opacity-60">{caricamento ? 'Salvataggio…' : 'Salva password e accedi'}</button>
         </form>
       </section>
