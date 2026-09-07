@@ -28,6 +28,16 @@ export default function ImpostazioniAdmin() {
     window.setTimeout(() => setToast(null), 5000)
   }
 
+  function announceCatalogUpdate() {
+    const updatedAt = String(Date.now())
+    window.localStorage.setItem('pricing-catalog-updated', updatedAt)
+    if (typeof BroadcastChannel !== 'undefined') {
+      const channel = new BroadcastChannel('pricing-catalog')
+      channel.postMessage({ updatedAt })
+      channel.close()
+    }
+  }
+
   async function load() {
     try {
       const [plansResponse, providersResponse] = await Promise.all([
@@ -91,6 +101,7 @@ export default function ImpostazioniAdmin() {
       setMessage(text)
       notify('success', text)
       setPdf(null)
+      announceCatalogUpdate()
       const input = document.getElementById('pricing-pdf') as HTMLInputElement | null
       if (input) input.value = ''
       await load()
