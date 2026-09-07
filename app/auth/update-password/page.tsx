@@ -51,10 +51,9 @@ export default function CambioPasswordObbligatorio() {
         return
       }
 
-      await supabase.auth.getSession()
-      setSuccesso('Password aggiornata. Reindirizzamento alla dashboard Admin…')
-      router.replace('/admin')
-      router.refresh()
+      try { await supabase.auth.signOut() } catch { /* il redirect al login resta il fallback sicuro */ }
+      setSuccesso('Password aggiornata con successo! Accedi con la nuova password dopo il reindirizzamento…')
+      window.setTimeout(() => router.replace('/login?next=%2Fadmin'), 900)
     } catch (error) {
       setErrore(error instanceof Error ? error.message : 'Si è verificato un errore durante il salvataggio. Riprova.')
     } finally {

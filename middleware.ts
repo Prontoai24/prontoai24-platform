@@ -48,7 +48,7 @@ export async function middleware(request: NextRequest) {
       .eq('id', user.id)
       .single()
 
-    if (profile?.must_change_password && path !== '/auth/update-password') {
+    if (profile?.must_change_password === true && path !== '/auth/update-password') {
       return NextResponse.redirect(new URL('/auth/update-password', request.url))
     }
 
