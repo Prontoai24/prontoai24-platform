@@ -2,6 +2,8 @@ import Link from 'next/link'
 import { ArrowRight, Bot, Check, ChevronDown, Clock3, Headphones, MessageSquareText, Network, PhoneCall, Sparkles, Workflow } from 'lucide-react'
 import AccessModal from '@/components/AccessModal'
 
+export const dynamic = 'force-dynamic'
+
 const services = [
   { icon: PhoneCall, tag: 'Voce', title: 'Assistenti vocali AI', text: 'Rispondono, qualificano le richieste e fissano appuntamenti anche quando il team non è disponibile.', color: 'bg-[#dff7f5]' },
   { icon: MessageSquareText, tag: 'Conversazioni', title: 'Chatbot e assistenza', text: 'Un primo livello di supporto sempre attivo, addestrato sui contenuti e sui processi della tua azienda.', color: 'bg-[#eaf0ff]' },
@@ -44,13 +46,13 @@ export default function Home() {
             <div className="mt-12 flex flex-wrap gap-x-7 gap-y-3 text-sm font-semibold text-[var(--muted)]"><span className="flex items-center gap-2"><Check size={16} className="text-[var(--cyan)]" /> Progetti su misura</span><span className="flex items-center gap-2"><Check size={16} className="text-[var(--cyan)]" /> Supporto umano</span><span className="flex items-center gap-2"><Check size={16} className="text-[var(--cyan)]" /> Nessuna soluzione preconfezionata</span></div>
           </div>
           <div className="relative mx-auto h-[400px] w-full max-w-[500px] lg:h-[500px]">
-            <div className="float absolute right-2 top-10 h-72 w-72 rounded-[42%] bg-[var(--cyan)]/20 blur-2xl" />
-            <div className="float-delay absolute bottom-10 left-2 h-64 w-64 rounded-full bg-[var(--lime)]/35 blur-2xl" />
-            <div className="absolute left-[12%] top-[11%] rotate-[-7deg] rounded-[30px] border border-white/70 bg-white/80 p-5 shadow-2xl shadow-[#0b6e9e]/15 backdrop-blur-xl sm:left-[15%] sm:w-[300px]">
+            <div className="float absolute z-0 right-2 top-10 h-72 w-72 rounded-[42%] bg-[var(--cyan)]/20 blur-2xl" />
+            <div className="float-delay absolute z-0 bottom-10 left-2 h-64 w-64 rounded-full bg-[var(--lime)]/35 blur-2xl" />
+            <div className="absolute z-0 left-[12%] top-[11%] rotate-[-7deg] rounded-[30px] border border-white/70 bg-white/80 p-5 shadow-2xl shadow-[#0b6e9e]/15 backdrop-blur-xl sm:left-[15%] sm:w-[300px]">
               <div className="mb-10 flex items-center justify-between"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#e5f8f6] text-[var(--blue)]"><Bot size={21} /></span><span className="rounded-full bg-[#eff9d8] px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-[#567318]">Attivo</span></div>
               <p className="text-xs font-bold uppercase tracking-[.14em] text-[var(--muted)]">Assistente AI</p><p className="mt-2 text-2xl font-bold">Pronto ad aiutare</p><div className="mt-6 h-2 overflow-hidden rounded-full bg-[#e5edf1]"><div className="h-full w-[78%] rounded-full bg-[var(--cyan)]" /></div><div className="mt-3 flex justify-between text-xs font-semibold text-[var(--muted)]"><span>Richieste gestite</span><span>78%</span></div>
             </div>
-            <div className="float absolute bottom-[12%] right-[3%] w-[230px] rotate-[6deg] rounded-[26px] border border-white/70 bg-[var(--ink)] p-5 text-white shadow-2xl shadow-[#0b2e44]/25 sm:w-[260px]"><div className="flex items-center gap-3"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10"><Clock3 size={17} className="text-[var(--lime)]" /></span><div><p className="text-xs text-white/60">Tempo recuperato</p><p className="mt-1 text-xl font-bold">Ogni settimana</p></div></div><p className="mt-5 text-sm leading-6 text-white/70">L’AI lavora in sottofondo. Il tuo team si concentra sulle decisioni.</p></div>
+            <div className="float absolute z-0 bottom-[12%] right-[3%] w-[230px] rotate-[6deg] rounded-[26px] border border-white/70 bg-[var(--ink)] p-5 text-white shadow-2xl shadow-[#0b2e44]/25 sm:w-[260px]"><div className="flex items-center gap-3"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10"><Clock3 size={17} className="text-[var(--lime)]" /></span><div><p className="text-xs text-white/60">Tempo recuperato</p><p className="mt-1 text-xl font-bold">Ogni settimana</p></div></div><p className="mt-5 text-sm leading-6 text-white/70">L’AI lavora in sottofondo. Il tuo team si concentra sulle decisioni.</p></div>
           </div>
         </div>
       </section>
