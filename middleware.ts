@@ -32,11 +32,11 @@ export async function middleware(request: NextRequest) {
   )
 
   const { data: { user } } = await supabase.auth.getUser()
-  const isAuthRoute = path.startsWith('/login') || path.startsWith('/auth')
+  const isAuthRoute = path.startsWith('/login') || path.startsWith('/client/login') || path.startsWith('/auth')
 
   // La home del dominio principale è pubblica; admin e client richiedono autenticazione.
   if (!user && !isAuthRoute && !isPublicHost) {
-    const loginUrl = new URL('/login', request.url)
+    const loginUrl = new URL(isClientHost ? '/client/login' : '/login', request.url)
     loginUrl.searchParams.set('next', isAdminHost ? '/admin' : '/client')
     return NextResponse.redirect(loginUrl)
   }
