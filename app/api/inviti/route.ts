@@ -1,11 +1,13 @@
+import crypto from 'node:crypto'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { Resend } from 'resend'
 import { NextResponse } from 'next/server'
 
 // Genera una password temporanea leggibile ma sicura
 function generaPasswordTemporanea() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'
-  return Array.from({ length: 12 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%'
+  const bytes = crypto.randomBytes(16)
+  return Array.from({ length: bytes.length }, (_, index) => chars[bytes[index] % chars.length]).join('')
 }
 
 export async function POST(request: Request) {
