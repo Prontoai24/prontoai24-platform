@@ -46,6 +46,7 @@ export default function CambioPasswordObbligatorio() {
       const completeBody = await completeResponse.json().catch(() => ({}))
       if (!completeResponse.ok) throw new Error(completeBody.error || 'Password aggiornata, ma completamento profilo non riuscito.')
 
+      await supabase.auth.getSession()
       setSuccesso('Password aggiornata. Reindirizzamento alla dashboard Admin…')
       router.replace('/admin')
       router.refresh()
