@@ -9,7 +9,7 @@ if (unauthenticated.status !== 401) throw new Error(`Smoke auth fallito: atteso 
 console.log('OK: endpoint protetto, richiesta anonima respinta con 401')
 
 if (!cookie) {
-  console.log('SKIP: TEST_AUTH_COOKIE non impostato; import autenticato non eseguito')
+  console.log('SKIP: TEST_AUTH_COOKIE non impostato; preview autenticata non eseguita')
   process.exit(0)
 }
 if (!filePath) throw new Error('Per il test autenticato indica il percorso del PDF: node scripts/test-pricing-pdf-import.mjs ./listino.pdf')
@@ -19,6 +19,8 @@ const form = new FormData()
 form.set('file', file, 'listino.pdf')
 const response = await fetch(`${baseUrl}/api/admin/plans/import`, { method: 'POST', headers: { Cookie: cookie }, body: form })
 const body = await response.json().catch(() => ({}))
-if (!response.ok) throw new Error(`Import PDF fallito (${response.status}): ${body.error || 'errore sconosciuto'}`)
-if (!Number.isInteger(body.imported) || body.imported < 1) throw new Error('Import PDF senza righe riconosciute')
-console.log(`OK: import autenticato completato, righe importate: ${body.imported}`)
+if (!response.ok) throw new Error(`Preview PDF fallita (${response.status}): ${body.error || 'errore sconosciuto'}`)
+if (body.preview !== true || !Array.isArray(body.rows) || body.rows.length < 1) throw new Error('La preview non contiene righe riconosciute')
+if (body.imported !== undefined || body.confirmed !== undefined) throw new Error('La preview non deve pubblicare il listino')
+console.log(`OK: preview autenticata completata, righe riconosciute: ${body.rows.length}`)
+console.log('INFO: la pubblicazione richiede una successiva POST JSON con { rows } e conferma esplicita')
