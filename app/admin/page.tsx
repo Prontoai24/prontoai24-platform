@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { ArrowUpRight, Bot, Building2, CircleDollarSign, Headphones, ShieldCheck, Users, Zap } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
+import AdminUserMenu from '@/components/AdminUserMenu'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,7 +24,7 @@ export default async function DashboardAdmin() {
 
   return (
     <main className="min-h-screen bg-[#f7fbff] text-[var(--ink)]">
-      <header className="border-b border-[var(--line)] bg-white px-6 py-5 lg:px-10"><div className="mx-auto flex max-w-7xl items-center justify-between"><Link href="/" className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[var(--ink)] font-bold text-white">P</span><span className="font-bold">ProntoAI<span className="text-[var(--cyan)]">24</span> <span className="ml-2 hidden text-sm font-medium text-[var(--muted)] sm:inline">Admin Console</span></span></Link><div className="flex items-center gap-4 text-sm"><span className="hidden text-[var(--muted)] sm:inline">{profilo?.full_name || 'Amministratore'}</span><span className="rounded-full bg-[#e5f8f6] px-3 py-1 font-bold text-[var(--blue)]">{profilo?.role}</span></div></div></header>
+      <header className="border-b border-[var(--line)] bg-white px-6 py-5 lg:px-10"><div className="mx-auto flex max-w-7xl items-center justify-between"><Link href="/" className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[var(--ink)] font-bold text-white">P</span><span className="font-bold">ProntoAI<span className="text-[var(--cyan)]">24</span> <span className="ml-2 hidden text-sm font-medium text-[var(--muted)] sm:inline">Admin Console</span></span></Link><AdminUserMenu name={profilo?.full_name || 'Amministratore'} role={profilo?.role || 'admin'} /></div></header>
       <div className="mx-auto max-w-7xl px-6 py-10 lg:px-10"><div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end"><div><p className="text-sm font-bold uppercase tracking-[.18em] text-[var(--blue)]">Regia della piattaforma</p><h1 className="mt-2 text-4xl font-bold">Buongiorno, {profilo?.full_name?.split(' ')[0] || 'Admin'}.</h1><p className="mt-3 text-[var(--muted)]">Tutto sotto controllo, in un unico spazio operativo.</p></div><div className="flex gap-3"><Link href="/admin/clienti/nuovo" className="rounded-full bg-[var(--ink)] px-5 py-3 text-sm font-bold text-white transition hover:bg-[#173d58]">+ Nuovo cliente</Link>{profilo?.role === 'super_admin' && <Link href="/admin/gestione-admin" className="rounded-full border border-[var(--line)] bg-white px-5 py-3 text-sm font-bold">Gestisci Admin</Link>}</div></div>
         <section className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{[
           { Icon: Building2, label: 'Clienti totali', value: rows.length, hint: 'Anagrafiche nella piattaforma', color: 'bg-[#eaf0ff]' },
