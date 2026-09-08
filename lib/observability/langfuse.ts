@@ -56,3 +56,18 @@ export async function traceLlmCall<T>(name: string, context: ObservabilityContex
     await langfuse.flushAsync()
   }
 }
+
+export async function recordVoiceEvent(event: string, context: ObservabilityContext, metadata: Record<string, unknown> = {}) {
+  const langfuse = getLangfuse()
+  if (!langfuse) return
+  const orgId = getOrgId(context.orgId)
+  const trace = langfuse.trace({
+    name: `voice-${event}`,
+    userId: context.userId || undefined,
+    sessionId: context.sessionId || undefined,
+    tags: [`org_id:${orgId}`, 'prontoai24', 'voice'],
+    metadata: { org_id: orgId, feature: context.feature || 'voice', ...metadata },
+  })
+  trace.event({ name: event, input: { event, ...metadata } })
+  await langfuse.flushAsync()
+}
