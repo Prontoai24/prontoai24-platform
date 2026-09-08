@@ -11,11 +11,18 @@
     "test:pricing-pdf": "node scripts/test-pricing-pdf-import.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.124.0",
+    "@langfuse/openai": "^5.11.0",
+    "@langfuse/otel": "^5.11.0",
+    "@opentelemetry/sdk-trace-node": "^2.11.0",
+    "@sentry/nextjs": "^10.73.0",
     "@supabase/ssr": "^0.5.1",
     "@supabase/supabase-js": "^2.45.4",
     "inngest": "^3.22.0",
+    "langfuse": "^3.38.20",
     "lucide-react": "^1.41.0",
     "next": "14.2.15",
+    "openai": "^7.10.0",
     "pdf-parse": "^2.4.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
