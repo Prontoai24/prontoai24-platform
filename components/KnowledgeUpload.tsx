@@ -1,9 +1,11 @@
 'use client'
 
 import { FormEvent, useEffect, useState } from 'react'
-import { FileText, Link2, Upload } from 'lucide-react'
+import { AlertTriangle, FileText, Link2, Upload } from 'lucide-react'
+import { createClient as createSupabaseBrowserClient } from '@/lib/supabase/client'
 
-type Source = { id: string; type: 'url' | 'file'; source_value: string; status: string; error_message?: string | null; created_at: string }
+type Source = { id: string; type: 'url' | 'file'; org_id?: string; source_value: string; status: string; error_message?: string | null; created_at: string; updated_at?: string }
+type RealtimeSource = Partial<Source> & { id: string }
 
 async function sha256(file: File) {
   const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer())
@@ -20,7 +22,45 @@ export default function KnowledgeUpload() {
     const response = await fetch('/api/client/knowledge/sources', { cache: 'no-store' })
     if (response.ok) setSources((await response.json()).sources || [])
   }
-  useEffect(() => { void refresh() }, [])
+
+  useEffect(() => {
+    const supabase = createSupabaseBrowserClient()
+    let mounted = true
+    let channel: ReturnType<typeof supabase.channel> | null = null
+
+    async function subscribe() {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user || !mounted) return
+      const { data: client } = await supabase.from('clients').select('id').eq('profile_id', user.id).single()
+      if (!client || !mounted) return
+
+      await refresh()
+      channel = supabase
+        .channel(`knowledge-sources-${client.id}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'knowledge_sources', filter: `org_id=eq.${client.id}` }, (payload) => {
+          if (!mounted) return
+          const next = payload.new as RealtimeSource
+          if (payload.eventType === 'DELETE') {
+            setSources((current) => current.filter((source) => source.id !== payload.old.id))
+            return
+          }
+          setSources((current) => {
+            const existing = current.find((source) => source.id === next.id)
+            if (!existing) return [{ ...(next as Source) }, ...current]
+            return current.map((source) => source.id === next.id ? { ...source, ...next } : source)
+          })
+        })
+        .subscribe((status) => {
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') void refresh()
+        })
+    }
+
+    void subscribe()
+    return () => {
+      mounted = false
+      if (channel) void supabase.removeChannel(channel)
+    }
+  }, [])
 
   async function addUrl(event: FormEvent) {
     event.preventDefault()
@@ -42,10 +82,7 @@ export default function KnowledgeUpload() {
       const response = await fetch('/api/client/knowledge/sources', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileName: file.name, mimeType: file.type || 'application/octet-stream', fileSize: file.size, contentHash }) })
       const body = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(body.error || 'Creazione fonte non riuscita.')
-      if (body.duplicate) {
-        setMessage(body.message || 'Documento già indicizzato.')
-        return
-      }
+      if (body.duplicate) { setMessage(body.message || 'Documento già indicizzato.'); return }
       const upload = await fetch(body.uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file })
       if (!upload.ok) throw new Error('Upload su Cloudflare R2 non riuscito.')
       const complete = await fetch(`/api/client/knowledge/sources/${body.source.id}/complete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileName: file.name, mimeType: file.type || 'application/octet-stream' }) })
@@ -66,6 +103,6 @@ export default function KnowledgeUpload() {
       <form onSubmit={addUrl} className="flex min-w-[min(100%,360px)] flex-1 gap-2"><div className="flex min-w-0 flex-1 items-center gap-2 rounded-full border border-[var(--line)] px-3"><Link2 size={16} className="shrink-0 text-[var(--muted)]" /><input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://www.tuosito.it" className="min-w-0 flex-1 py-2 text-sm outline-none" aria-label="URL sito da acquisire" /></div><button disabled={loading || !url.trim()} className="rounded-full bg-[var(--blue)] px-4 py-2 text-sm font-bold text-white disabled:opacity-40">Aggiungi URL</button></form>
     </div>
     {message && <p className="text-xs font-semibold text-[var(--muted)]">{message}</p>}
-    <div className="space-y-2">{sources.length === 0 && <p className="text-sm text-[var(--muted)]">Nessuna fonte ancora collegata.</p>}{sources.map((source) => <div key={source.id} className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--line)] px-4 py-3"><div className="flex min-w-0 items-center gap-3"><FileText size={17} className="shrink-0 text-[var(--blue)]" /><p className="truncate text-sm font-semibold">{source.source_value}</p></div><span className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${source.status === 'ready' ? 'bg-[#e5f8f6] text-[var(--blue)]' : source.status === 'error' ? 'bg-red-50 text-red-700' : 'bg-[#fff0dc] text-[#9b5d00]'}`}>{statusLabel[source.status] || source.status}</span></div>)}</div>
+    <div className="space-y-2">{sources.length === 0 && <p className="text-sm text-[var(--muted)]">Nessuna fonte ancora collegata.</p>}{sources.map((source) => <div key={source.id} className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--line)] px-4 py-3"><div className="flex min-w-0 items-center gap-3"><FileText size={17} className="shrink-0 text-[var(--blue)]" /><p className="truncate text-sm font-semibold">{source.source_value}</p>{source.status === 'error' && <span title={source.error_message || 'Errore durante l’elaborazione'} aria-label={source.error_message || 'Errore durante l’elaborazione'} className="group relative shrink-0 text-red-600"><AlertTriangle size={17} /><span role="tooltip" className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 hidden w-72 -translate-x-1/2 rounded-lg bg-slate-900 px-3 py-2 text-left text-xs font-medium text-white shadow-lg group-hover:block group-focus-within:block">{source.error_message || 'Errore durante l’elaborazione della fonte.'}</span></span>}</div><span className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${source.status === 'ready' ? 'bg-[#e5f8f6] text-[var(--blue)]' : source.status === 'error' ? 'bg-red-50 text-red-700' : 'bg-[#fff0dc] text-[#9b5d00]'}`}>{statusLabel[source.status] || source.status}</span></div>)}</div>
   </div>
 }
