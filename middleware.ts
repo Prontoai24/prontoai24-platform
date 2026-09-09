@@ -12,6 +12,7 @@ export async function middleware(request: NextRequest) {
     : originalPath
 
   let response = NextResponse.next({ request: { headers: request.headers } })
+  response.headers.set('Cache-Control', 'private, no-store, max-age=0, must-revalidate')
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,

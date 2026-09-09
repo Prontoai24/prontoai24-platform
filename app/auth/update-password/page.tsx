@@ -3,8 +3,9 @@
 export const dynamic = 'force-dynamic'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Check, KeyRound, LockKeyhole } from 'lucide-react'
+import { Check, KeyRound, LockKeyhole, ArrowLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
 const passwordRules = [
@@ -23,64 +24,23 @@ export default function CambioPasswordObbligatorio() {
   const router = useRouter()
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setErrore(null)
-    setSuccesso(null)
-
-    if (!passwordRules.every(({ test }) => test(nuovaPassword))) {
-      setErrore('La password non rispetta tutti i requisiti di sicurezza.')
-      return
-    }
-    if (nuovaPassword !== conferma) {
-      setErrore('Le password non coincidono.')
-      return
-    }
-
+    event.preventDefault(); setErrore(null); setSuccesso(null)
+    if (!passwordRules.every(({ test }) => test(nuovaPassword))) return setErrore('La password non rispetta tutti i requisiti di sicurezza.')
+    if (nuovaPassword !== conferma) return setErrore('Le password non coincidono.')
     setCaricamento(true)
     try {
-      const supabase = createClient()
-      const { error: updateError } = await supabase.auth.updateUser({ password: nuovaPassword })
-      if (updateError) throw new Error(`Supabase non ha aggiornato la password: ${updateError.message}`)
-
-      const completeResponse = await fetch('/api/auth/complete-password', { method: 'POST', cache: 'no-store' })
-      const completeBody = await completeResponse.json().catch(() => ({}))
-      if (!completeResponse.ok || completeBody.profileCompleted !== true) {
-        try { await supabase.auth.signOut() } catch { /* il redirect al login completa comunque il fallback */ }
-        setSuccesso('Password aggiornata con successo! Accedi con la nuova password dopo il reindirizzamento…')
-        window.setTimeout(() => router.replace('/login'), 900)
-        return
-      }
-
-      // Invalida esplicitamente access token, refresh token e cookie locali prima
-      // di lasciare la pagina: il nuovo login deve partire da una sessione pulita.
-      const { error: signOutError } = await supabase.auth.signOut({ scope: 'global' })
-      if (signOutError) throw new Error(`Password aggiornata, ma il logout non è riuscito: ${signOutError.message}`)
+      const response = await fetch('/api/auth/complete-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: nuovaPassword }), cache: 'no-store' })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok || body.profileCompleted !== true) throw new Error(body.error || 'Impossibile completare il profilo.')
+      // La route server ha già invalidato i cookie HTTP-only; questo pulisce anche
+      // lo storage del client Supabase e impedisce il riuso del token corrente.
+      await createClient().auth.signOut({ scope: 'global' }).catch(() => {})
       setSuccesso('Password aggiornata con successo. Effettua il login con le nuove credenziali.')
-      window.setTimeout(() => { window.location.replace('/login?next=%2Fadmin&reset=success') }, 700)
+      window.setTimeout(() => window.location.replace('/login?updated=true'), 700)
     } catch (error) {
       setErrore(error instanceof Error ? error.message : 'Si è verificato un errore durante il salvataggio. Riprova.')
-    } finally {
-      setCaricamento(false)
-    }
+    } finally { setCaricamento(false) }
   }
 
-  return (
-    <main className="grid-paper flex min-h-screen items-center justify-center px-6 py-12">
-      <section className="w-full max-w-lg rounded-[30px] border border-[var(--line)] bg-white p-7 shadow-xl shadow-[#0b6e9e]/10 sm:p-10">
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#e5f8f6] text-[var(--blue)]"><LockKeyhole size={23} /></div>
-        <p className="mt-7 text-xs font-bold uppercase tracking-[.18em] text-[var(--blue)]">Primo accesso</p>
-        <h1 className="mt-3 text-3xl font-bold text-[var(--ink)]">Imposta una nuova password</h1>
-        <p className="mt-4 leading-7 text-[var(--muted)]">Per proteggere il tuo account devi sostituire la password temporanea prima di accedere alla dashboard Admin.</p>
-
-        <form onSubmit={handleSubmit} className="mt-8 space-y-5">
-          <label className="block text-sm font-semibold text-[var(--ink)]">Nuova password<input type="password" value={nuovaPassword} onChange={(event) => setNuovaPassword(event.target.value)} required autoComplete="new-password" className="mt-2 w-full rounded-2xl border border-[var(--line)] px-4 py-3 outline-none transition focus:border-[var(--cyan)] focus:ring-2 focus:ring-[var(--cyan)]/20" /></label>
-          <label className="block text-sm font-semibold text-[var(--ink)]">Conferma nuova password<input type="password" value={conferma} onChange={(event) => setConferma(event.target.value)} required autoComplete="new-password" className="mt-2 w-full rounded-2xl border border-[var(--line)] px-4 py-3 outline-none transition focus:border-[var(--cyan)] focus:ring-2 focus:ring-[var(--cyan)]/20" /></label>
-          <div className="rounded-2xl bg-[var(--paper)] p-4"><p className="flex items-center gap-2 text-sm font-bold text-[var(--ink)]"><KeyRound size={16} className="text-[var(--blue)]" /> Requisiti di sicurezza</p><ul className="mt-3 grid gap-2 text-sm text-[var(--muted)] sm:grid-cols-2">{passwordRules.map(({ label, test }) => <li key={label} className="flex items-center gap-2"><Check size={15} className={test(nuovaPassword) ? 'text-[#5b9b27]' : 'text-[var(--line)]'} />{label}</li>)}</ul></div>
-          {errore && <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{errore}</p>}
-          {successo && <p role="status" className="rounded-xl bg-[#e5f8f6] px-4 py-3 text-sm font-semibold text-[var(--blue)]">{successo}</p>}
-          <button type="submit" disabled={caricamento} className="btn-primary w-full rounded-full bg-[var(--ink)] px-5 py-3.5 font-bold text-white disabled:cursor-not-allowed disabled:opacity-60">{caricamento ? 'Salvataggio…' : 'Salva password e accedi'}</button>
-        </form>
-      </section>
-    </main>
-  )
+  return <main className="grid-paper flex min-h-screen items-center justify-center px-6 py-12"><section className="w-full max-w-lg rounded-[30px] border border-[var(--line)] bg-white p-7 shadow-xl shadow-[#0b6e9e]/10 sm:p-10"><div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#e5f8f6] text-[var(--blue)]"><LockKeyhole size={23} /></div><p className="mt-7 text-xs font-bold uppercase tracking-[.18em] text-[var(--blue)]">Primo accesso</p><h1 className="mt-3 text-3xl font-bold text-[var(--ink)]">Imposta una nuova password</h1><p className="mt-4 leading-7 text-[var(--muted)]">Per proteggere il tuo account devi sostituire la password temporanea prima di accedere alla dashboard Admin.</p><form onSubmit={handleSubmit} className="mt-8 space-y-5"><label className="block text-sm font-semibold text-[var(--ink)]">Nuova password<input type="password" value={nuovaPassword} onChange={(event) => setNuovaPassword(event.target.value)} required autoComplete="new-password" className="mt-2 w-full rounded-2xl border border-[var(--line)] px-4 py-3 outline-none transition focus:border-[var(--cyan)] focus:ring-2 focus:ring-[var(--cyan)]/20" /></label><label className="block text-sm font-semibold text-[var(--ink)]">Conferma nuova password<input type="password" value={conferma} onChange={(event) => setConferma(event.target.value)} required autoComplete="new-password" className="mt-2 w-full rounded-2xl border border-[var(--line)] px-4 py-3 outline-none transition focus:border-[var(--cyan)] focus:ring-2 focus:ring-[var(--cyan)]/20" /></label><div className="rounded-2xl bg-[var(--paper)] p-4"><p className="flex items-center gap-2 text-sm font-bold text-[var(--ink)]"><KeyRound size={16} className="text-[var(--blue)]" /> Requisiti di sicurezza</p><ul className="mt-3 grid gap-2 text-sm text-[var(--muted)] sm:grid-cols-2">{passwordRules.map(({ label, test }) => <li key={label} className="flex items-center gap-2"><Check size={15} className={test(nuovaPassword) ? 'text-[#5b9b27]' : 'text-[var(--line)]'} />{label}</li>)}</ul></div>{errore && <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{errore}</p>}{successo && <p role="status" className="rounded-xl bg-[#e5f8f6] px-4 py-3 text-sm font-semibold text-[var(--blue)]">{successo}</p>}<button type="submit" disabled={caricamento} className="btn-primary w-full rounded-full bg-[var(--ink)] px-5 py-3.5 font-bold text-white disabled:cursor-not-allowed disabled:opacity-60">{caricamento ? 'Salvataggio…' : 'Salva password e accedi'}</button></form><Link href="/login" className="mt-6 inline-flex items-center gap-2 text-sm font-bold text-[var(--blue)] hover:underline"><ArrowLeft size={16} /> Torna al Login</Link></section></main>
 }
