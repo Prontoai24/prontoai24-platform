@@ -42,9 +42,8 @@ function unstructuredConfig() {
   if (!['http:', 'https:'].includes(base.protocol)) throw new Error('UNSTRUCTURED_API_URL deve usare http o https')
 
   const pathname = base.pathname.replace(/\/+$/, '')
-  if (pathname.endsWith('/api/v1/partition') || pathname.endsWith('/general/v0/general')) base.pathname = pathname
-  else if (pathname.endsWith('/api/v1')) base.pathname = `${pathname}/partition`
-  else base.pathname = `${pathname}/api/v1/partition`
+  if (pathname.endsWith('/api/v1')) base.pathname = pathname
+  else base.pathname = `${pathname}/api/v1`
   base.search = ''
   return { endpoint: base.toString(), apiKey }
 }
@@ -71,20 +70,43 @@ export async function crawlUrl(url: string) {
 
 export async function parseFile(file: File) {
   const buffer = Buffer.from(await file.arrayBuffer())
-  const { endpoint, apiKey } = unstructuredConfig()
+  const { endpoint: apiBase, apiKey } = unstructuredConfig()
   const form = new FormData()
-  form.append('files', new Blob([buffer], { type: file.type || 'application/octet-stream' }), file.name)
-  const response = await fetch(endpoint, {
+  form.append('request_data', JSON.stringify({ job_nodes: [{ name: 'Partitioner', type: 'partition', subtype: 'vlm', settings: { is_dynamic: true, allow_fast: true } }] }))
+  form.append('input_files', new Blob([buffer], { type: file.type || 'application/octet-stream' }), file.name)
+  const response = await fetch(`${apiBase}/jobs/`, {
     method: 'POST',
-    headers: { 'unstructured-api-key': apiKey },
+    headers: { accept: 'application/json', 'unstructured-api-key': apiKey },
     body: form,
   })
   if (!response.ok) {
     const detail = (await response.text().catch(() => '')).slice(0, 500)
-    console.error('[knowledge] Unstructured parsing failed', { endpoint, status: response.status, detail })
+    console.error('[knowledge] Unstructured parsing failed', { endpoint: apiBase, status: response.status, detail })
     throw new Error(`Unstructured HTTP ${response.status}`)
   }
-  const elements = await response.json() as Array<{ text?: string }>
+  const created = await response.json() as { id?: string; job_information?: { id?: string } }
+  const jobId = created.id || created.job_information?.id
+  if (!jobId) throw new Error('Unstructured non ha restituito un job id')
+  const deadline = Date.now() + 120_000
+  let job: { status?: string; output_node_files?: Array<{ file_id?: string }> } = {}
+  while (Date.now() < deadline) {
+    const statusResponse = await fetch(`${apiBase}/jobs/${jobId}`, { headers: { accept: 'application/json', 'unstructured-api-key': apiKey } })
+    if (!statusResponse.ok) throw new Error(`Unstructured job status HTTP ${statusResponse.status}`)
+    job = await statusResponse.json() as typeof job
+    if (job.status === 'COMPLETED') break
+    if (job.status === 'FAILED' || job.status === 'STOPPED') throw new Error(`Unstructured job ${job.status}`)
+    await new Promise((resolve) => setTimeout(resolve, 2_000))
+  }
+  if (job.status !== 'COMPLETED') throw new Error('Timeout elaborazione Unstructured job')
+  const fileIds = (job.output_node_files || []).map((item) => item.file_id).filter((value): value is string => Boolean(value))
+  if (!fileIds.length) throw new Error('Unstructured job senza output')
+  const elements: Array<{ text?: string }> = []
+  for (const fileId of fileIds) {
+    const outputResponse = await fetch(`${apiBase}/jobs/${jobId}/download?file_id=${encodeURIComponent(fileId)}`, { headers: { 'unstructured-api-key': apiKey } })
+    if (!outputResponse.ok) throw new Error(`Unstructured output HTTP ${outputResponse.status}`)
+    const output = await outputResponse.json() as Array<{ text?: string }> | { elements?: Array<{ text?: string }> }
+    elements.push(...(Array.isArray(output) ? output : output.elements || []))
+  }
   const text = elements.map((element) => element.text || '').filter(Boolean).join('\n')
   if (!text.trim()) throw new Error('Unstructured non ha restituito testo estraibile')
   return text
