@@ -51,9 +51,12 @@ export default function CambioPasswordObbligatorio() {
         return
       }
 
-      try { await supabase.auth.signOut() } catch { /* il redirect al login resta il fallback sicuro */ }
-      setSuccesso('Password aggiornata con successo! Accedi con la nuova password dopo il reindirizzamento…')
-      window.setTimeout(() => router.replace('/login?next=%2Fadmin'), 900)
+      // Invalida esplicitamente access token, refresh token e cookie locali prima
+      // di lasciare la pagina: il nuovo login deve partire da una sessione pulita.
+      const { error: signOutError } = await supabase.auth.signOut({ scope: 'global' })
+      if (signOutError) throw new Error(`Password aggiornata, ma il logout non è riuscito: ${signOutError.message}`)
+      setSuccesso('Password aggiornata con successo. Effettua il login con le nuove credenziali.')
+      window.setTimeout(() => { window.location.replace('/login?next=%2Fadmin&reset=success') }, 700)
     } catch (error) {
       setErrore(error instanceof Error ? error.message : 'Si è verificato un errore durante il salvataggio. Riprova.')
     } finally {

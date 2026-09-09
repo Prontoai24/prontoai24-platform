@@ -54,7 +54,9 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(loginUrl)
     }
 
-    if (profile?.must_change_password === true && path !== '/auth/update-password') {
+    // Una sessione ancora presente non deve mai rimbalzare dalla pagina di login
+    // al reset password: il login è il punto di uscita del flusso post-reset.
+    if (profile?.must_change_password === true && !isAuthRoute && path !== '/auth/update-password') {
       return NextResponse.redirect(new URL('/auth/update-password', request.url))
     }
 
