@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "next lint",
     "seed:super-admin": "node scripts/seed-super-admin.mjs",
-    "test:pricing-pdf": "node scripts/test-pricing-pdf-import.mjs"
+    "test:pricing-pdf": "node scripts/test-pricing-pdf-import.mjs",
+    "test:omnichannel": "node scripts/test-omnichannel-webhooks.mjs",
+    "test:knowledge-rag": "env -u OPENAI_API_KEY -u FIRECRAWL_API_KEY node --env-file=.env.local scripts/test-knowledge-rag-e2e.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0",
