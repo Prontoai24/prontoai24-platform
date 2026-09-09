@@ -8,11 +8,12 @@ import { useRouter } from 'next/navigation'
 import { Check, KeyRound, LockKeyhole, ArrowLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
+const SPECIAL_CHARACTER_REGEX = /[^A-Za-z0-9\s]/
 const passwordRules = [
   { label: 'Almeno 8 caratteri', test: (value: string) => value.length >= 8 },
   { label: 'Una lettera maiuscola', test: (value: string) => /[A-Z]/.test(value) },
   { label: 'Un numero', test: (value: string) => /[0-9]/.test(value) },
-  { label: 'Un carattere speciale', test: (value: string) => /[^A-Za-z0-9]/.test(value) },
+  { label: 'Un carattere speciale (= @ $ ! % * # ? &)', test: (value: string) => SPECIAL_CHARACTER_REGEX.test(value) },
 ]
 
 export default function CambioPasswordObbligatorio() {
@@ -35,7 +36,7 @@ export default function CambioPasswordObbligatorio() {
       // La route server ha già invalidato i cookie HTTP-only; questo pulisce anche
       // lo storage del client Supabase e impedisce il riuso del token corrente.
       await createClient().auth.signOut({ scope: 'global' }).catch(() => {})
-      setSuccesso('Password aggiornata con successo. Effettua il login con le nuove credenziali.')
+      setSuccesso('Password aggiornata con successo. Effettua il login con la nuova password.')
       window.setTimeout(() => window.location.replace('/login?updated=true'), 700)
     } catch (error) {
       setErrore(error instanceof Error ? error.message : 'Si è verificato un errore durante il salvataggio. Riprova.')

@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
 type CookieMutation = { name: string; value: string; options: CookieOptions }
+const SPECIAL_CHARACTER_REGEX = /[^A-Za-z0-9\s]/
 
 function jsonError(error: string, status: number) {
   return NextResponse.json({ error, profileCompleted: false }, { status, headers: { 'Cache-Control': 'no-store' } })
@@ -35,7 +36,7 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => ({}))
   const password = typeof body.password === 'string' ? body.password : ''
-  if (password.length < 8 || !/[A-Z]/.test(password) || !/[0-9]/.test(password) || !/[^A-Za-z0-9]/.test(password)) return jsonError('La nuova password non rispetta i requisiti di sicurezza.', 400)
+  if (password.length < 8 || !/[A-Z]/.test(password) || !/[0-9]/.test(password) || !SPECIAL_CHARACTER_REGEX.test(password)) return jsonError('La nuova password non rispetta i requisiti di sicurezza.', 400)
 
   try {
     const adminClient = createAdminClient()
