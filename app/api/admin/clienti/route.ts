@@ -54,7 +54,7 @@ export async function POST(request: Request) {
     const resendKey = process.env.RESEND_API_KEY
     if (!resendKey) return NextResponse.json({ error: 'Cliente creato, ma RESEND_API_KEY non configurata' }, { status: 503 })
     const resend = new Resend(resendKey)
-    const loginUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://client.prontoai24.it'
+    const loginUrl = process.env.NEXT_PUBLIC_CLIENT_APP_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://client.prontoai24.it'
     const { error: emailError } = await resend.emails.send({ from: 'ProntoAI24 <no-reply@prontoai24.it>', to: contactEmail, subject: 'Benvenuto nell’Area Clienti ProntoAI24', text: `Il tuo accesso è pronto. Area Clienti: ${loginUrl}\nEmail: ${contactEmail}\nPassword temporanea: ${password}\nAl primo accesso dovrai impostare una nuova password.`, html: `<p>Il tuo accesso all’Area Clienti è pronto.</p><p><strong>Area Clienti:</strong> <a href="${loginUrl}">${loginUrl}</a><br><strong>Email:</strong> ${contactEmail}<br><strong>Password temporanea:</strong> ${password}</p><p>Al primo accesso dovrai impostare una nuova password.</p>` })
     if (emailError) return NextResponse.json({ error: `Cliente creato, ma invio email fallito: ${emailError.message}` }, { status: 502 })
   }
