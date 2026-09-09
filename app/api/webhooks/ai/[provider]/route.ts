@@ -193,7 +193,9 @@ export async function POST(request: Request, context: { params: { provider: stri
 
   const expected = process.env.AI_WEBHOOK_SECRET
   const receivedSecret = request.headers.get('x-prontoai-webhook-secret') || request.headers.get('x-vapi-secret') || request.headers.get('x-webhook-secret')
-  if (expected && receivedSecret !== expected) return NextResponse.json({ error: 'Firma webhook non valida' }, { status: 401 })
+  const receivedWebChatKey = request.headers.get('x-webchat-public-key')
+  const validWebChatKey = provider === 'webchat' && process.env.NEXT_PUBLIC_WEBCHAT_PUBLIC_KEY && receivedWebChatKey === process.env.NEXT_PUBLIC_WEBCHAT_PUBLIC_KEY
+  if (expected && receivedSecret !== expected && !validWebChatKey) return NextResponse.json({ error: 'Firma webhook non valida' }, { status: 401 })
 
   try {
     const payload = await request.json() as JsonObject

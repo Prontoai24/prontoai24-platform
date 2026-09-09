@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "seed:super-admin": "node scripts/seed-super-admin.mjs",
-    "test:pricing-pdf": "node scripts/test-pricing-pdf-import.mjs"
+    "test:pricing-pdf": "node scripts/test-pricing-pdf-import.mjs",
+    "test:omnichannel": "node scripts/test-omnichannel-webhooks.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0",
