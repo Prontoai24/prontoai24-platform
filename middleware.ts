@@ -44,9 +44,15 @@ export async function middleware(request: NextRequest) {
   if (user) {
     const { data: profile } = await supabase
       .from('profiles')
-      .select('role, must_change_password')
+      .select('role, must_change_password, status')
       .eq('id', user.id)
       .single()
+
+    if (profile?.status === 'suspended' && !isAuthRoute) {
+      const loginUrl = new URL(isClientHost ? '/client/login' : '/login', request.url)
+      loginUrl.searchParams.set('error', 'account_suspended')
+      return NextResponse.redirect(loginUrl)
+    }
 
     if (profile?.must_change_password === true && path !== '/auth/update-password') {
       return NextResponse.redirect(new URL('/auth/update-password', request.url))
