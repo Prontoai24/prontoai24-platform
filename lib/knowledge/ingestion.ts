@@ -23,6 +23,32 @@ export function contentHash(content: string | Buffer | Uint8Array) {
   return crypto.createHash('sha256').update(value).digest('hex')
 }
 
+function unstructuredConfig() {
+  const rawUrl = process.env.UNSTRUCTURED_API_URL?.trim()
+  const apiKey = process.env.UNSTRUCTURED_API_KEY?.trim()
+  if (!rawUrl || !apiKey) {
+    const missing = [!rawUrl && 'UNSTRUCTURED_API_URL', !apiKey && 'UNSTRUCTURED_API_KEY'].filter(Boolean).join(', ')
+    console.error('[knowledge] Unstructured configuration missing', { missing })
+    throw new Error(`Configurazione Unstructured incompleta: manca ${missing}`)
+  }
+
+  let base: URL
+  try {
+    base = new URL(rawUrl)
+  } catch {
+    console.error('[knowledge] Invalid UNSTRUCTURED_API_URL')
+    throw new Error('UNSTRUCTURED_API_URL non è un URL valido')
+  }
+  if (!['http:', 'https:'].includes(base.protocol)) throw new Error('UNSTRUCTURED_API_URL deve usare http o https')
+
+  const pathname = base.pathname.replace(/\/+$/, '')
+  if (pathname.endsWith('/api/v1/partition') || pathname.endsWith('/general/v0/general')) base.pathname = pathname
+  else if (pathname.endsWith('/api/v1')) base.pathname = `${pathname}/partition`
+  else base.pathname = `${pathname}/api/v1/partition`
+  base.search = ''
+  return { endpoint: base.toString(), apiKey }
+}
+
 export async function crawlUrl(url: string) {
   if (process.env.FIRECRAWL_API_KEY) {
     const response = await fetch('https://api.firecrawl.dev/v2/scrape', {
@@ -45,29 +71,30 @@ export async function crawlUrl(url: string) {
 
 export async function parseFile(file: File) {
   const buffer = Buffer.from(await file.arrayBuffer())
-  if (process.env.UNSTRUCTURED_API_KEY) {
-    const form = new FormData()
-    form.append('files', new Blob([buffer], { type: file.type || 'application/octet-stream' }), file.name)
-    const response = await fetch(process.env.UNSTRUCTURED_API_URL || 'https://api.unstructured.io/general/v0/general', {
-      method: 'POST', headers: { 'unstructured-api-key': process.env.UNSTRUCTURED_API_KEY }, body: form,
-    })
-    if (!response.ok) throw new Error(`Unstructured HTTP ${response.status}`)
-    const elements = await response.json() as Array<{ text?: string }>
-    return elements.map((element) => element.text || '').filter(Boolean).join('\n')
+  const { endpoint, apiKey } = unstructuredConfig()
+  const form = new FormData()
+  form.append('files', new Blob([buffer], { type: file.type || 'application/octet-stream' }), file.name)
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'unstructured-api-key': apiKey },
+    body: form,
+  })
+  if (!response.ok) {
+    const detail = (await response.text().catch(() => '')).slice(0, 500)
+    console.error('[knowledge] Unstructured parsing failed', { endpoint, status: response.status, detail })
+    throw new Error(`Unstructured HTTP ${response.status}`)
   }
-  if (file.type === 'text/plain' || file.name.toLowerCase().endsWith('.txt') || file.name.toLowerCase().endsWith('.md') || file.name.toLowerCase().endsWith('.csv')) return buffer.toString('utf8')
-  if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-    const pdfParse = (await import('pdf-parse')).default
-    const parsed = await pdfParse(buffer)
-    return parsed.text
-  }
-  throw new Error('Per questo tipo di file configurare UNSTRUCTURED_API_KEY')
+  const elements = await response.json() as Array<{ text?: string }>
+  const text = elements.map((element) => element.text || '').filter(Boolean).join('\n')
+  if (!text.trim()) throw new Error('Unstructured non ha restituito testo estraibile')
+  return text
 }
 
 export async function embedTexts(texts: string[]) {
   if (!process.env.OPENAI_API_KEY) return null
   const response = await fetch('https://api.openai.com/v1/embeddings', {
-    method: 'POST', headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+    method: 'POST',
+    headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model: process.env.EMBEDDING_MODEL || 'text-embedding-3-small', input: texts }),
   })
   if (!response.ok) throw new Error(`Embeddings HTTP ${response.status}`)
