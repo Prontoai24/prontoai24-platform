@@ -30,12 +30,15 @@ export default function CambioPasswordObbligatorio() {
     if (nuovaPassword !== conferma) return setErrore('Le password non coincidono.')
     setCaricamento(true)
     try {
-      const response = await fetch('/api/auth/complete-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: nuovaPassword }), cache: 'no-store' })
+      const client = createClient()
+      const { data: { session } } = await client.auth.getSession()
+      if (!session?.access_token) throw new Error('Sessione di primo accesso non disponibile. Torna al login e riprova.')
+      const response = await fetch('/api/auth/complete-password', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ password: nuovaPassword }), cache: 'no-store' })
       const body = await response.json().catch(() => ({}))
       if (!response.ok || body.profileCompleted !== true) throw new Error(body.error || 'Impossibile completare il profilo.')
       // La route server ha già invalidato i cookie HTTP-only; questo pulisce anche
       // lo storage del client Supabase e impedisce il riuso del token corrente.
-      await createClient().auth.signOut({ scope: 'global' }).catch(() => {})
+      await client.auth.signOut({ scope: 'global' }).catch(() => {})
       setSuccesso('Password aggiornata con successo. Effettua il login con la nuova password.')
       window.setTimeout(() => window.location.replace('/login?updated=true'), 700)
     } catch (error) {

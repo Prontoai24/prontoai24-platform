@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
+import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { createAdminClient } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
@@ -30,7 +31,9 @@ export async function POST(request: Request) {
       },
     }
   )
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
+  const bearer = request.headers.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1]
+  const tokenClient = bearer ? createSupabaseClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { auth: { autoRefreshToken: false, persistSession: false } }) : null
+  const { data: { user }, error: authError } = tokenClient ? await tokenClient.auth.getUser(bearer) : await supabase.auth.getUser()
   if (authError || !user) return jsonError(`Sessione non valida o scaduta. Effettua nuovamente il login. (${authError?.message || 'utente non trovato'})`, 401)
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return jsonError('Configurazione server incompleta: SUPABASE_SERVICE_ROLE_KEY mancante.', 503)
 
