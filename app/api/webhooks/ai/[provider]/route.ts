@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { captureObservedException, captureObservedMessage } from '@/lib/observability/sentry'
 import { recordChannelEvent, recordVoiceEvent } from '@/lib/observability/langfuse'
 import { buildKnowledgePrompt, generateKnowledgeReply } from '@/lib/knowledge/rag'
+import { inngest } from '@/lib/inngest'
 
 export const dynamic = 'force-dynamic'
 
@@ -179,6 +180,9 @@ async function handleVoice(payload: JsonObject, adminClient: ReturnType<typeof c
   await adminClient.from('audit_logs').insert({ action: `vapi.webhook.${event}`, entity_type: 'vapi', metadata: { orgId, providerCallId, conversationId, duration, hasTranscript: Boolean(transcript), hasRecording: Boolean(recordingUrl) } })
   captureObservedMessage(`Vapi voice event: ${event}`, 'info', orgId, { providerCallId, conversationId, duration })
   await recordVoiceEvent(event, { orgId, sessionId: conversationId, feature: 'vapi-voice' }, { providerCallId, duration, hasTranscript: Boolean(transcript), hasRecording: Boolean(recordingUrl) })
+  if (event === 'end-of-call-report' || event === 'call.ended' || event === 'call-ended') {
+    await inngest.send({ name: 'vapi/call.ended', data: { org_id: orgId, duration_seconds: duration, provider_call_id: providerCallId } })
+  }
   const ragSystemPrompt = transcript ? await buildKnowledgePrompt(orgId, transcript, 'Sei l’assistente vocale di ProntoAI24. Rispondi in italiano e usa solo informazioni verificate del tenant.') : null
   return NextResponse.json({ received: true, org_id: orgId, conversation_id: conversationId, event, rag_system_prompt: ragSystemPrompt })
 }
@@ -247,6 +251,9 @@ async function handleMessaging(provider: 'whatsapp' | 'webchat', payload: JsonOb
   await adminClient.from('audit_logs').insert({ action: `${provider}.webhook.message`, entity_type: provider, metadata: { orgId, conversationId: conversationExternalId, providerMessageId } })
   captureObservedMessage(`${provider} message received`, 'info', orgId, { conversationId: conversationExternalId, providerMessageId })
   await recordChannelEvent(provider, 'message.received', { orgId, sessionId: conversationExternalId, feature: `${provider}-inbox` }, { providerMessageId, bodyLength: body.length })
+  if (provider === 'whatsapp') {
+    await inngest.send({ name: 'whatsapp/message.sent', data: { org_id: orgId, provider_message_id: providerMessageId } })
+  }
   const generated = await generateKnowledgeReply(orgId, body)
   if (generated.usage) {
     await adminClient.from('ai_usage_events').insert({

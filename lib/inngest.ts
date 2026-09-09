@@ -90,3 +90,61 @@ export const processKnowledgeIngestion = inngest.createFunction(
     })
   },
 )
+
+
+export const trackVoiceCallUsage = inngest.createFunction(
+  { id: 'track-voice-call-usage', name: 'Track voice call usage' },
+  { event: 'vapi/call.ended' },
+  async ({ event, step }) => step.run('record-voice-minutes', async () => {
+    const data = event.data as { org_id?: string; orgId?: string; duration_seconds?: number; durationSeconds?: number }
+    const orgId = data.org_id || data.orgId
+    const seconds = Number(data.duration_seconds ?? data.durationSeconds ?? 0)
+    if (!orgId || !Number.isFinite(seconds) || seconds <= 0) return { skipped: true, reason: 'invalid event' }
+    const quantity = Math.ceil(seconds / 60)
+    const { error } = await adminDb().from('usage_events').insert({ org_id: orgId, type: 'voice_minute', quantity })
+    if (error) throw error
+    return { orgId, quantity }
+  }),
+)
+
+export const trackWhatsAppUsage = inngest.createFunction(
+  { id: 'track-whatsapp-usage', name: 'Track WhatsApp usage' },
+  { event: 'whatsapp/message.sent' },
+  async ({ event, step }) => step.run('record-whatsapp-message', async () => {
+    const data = event.data as { org_id?: string; orgId?: string }
+    const orgId = data.org_id || data.orgId
+    if (!orgId) return { skipped: true, reason: 'missing org_id' }
+    const { error } = await adminDb().from('usage_events').insert({ org_id: orgId, type: 'whatsapp_message', quantity: 1 })
+    if (error) throw error
+    return { orgId, quantity: 1 }
+  }),
+)
+
+const PLAN_LIMITS: Record<string, number> = { free: 30, base: 200, pro: 1000, enterprise: 999999 }
+
+export const checkUsageLimits = inngest.createFunction(
+  { id: 'check-usage-limits-hourly', name: 'Check hourly usage limits' },
+  { cron: '0 * * * *' },
+  async ({ step }) => step.run('check-client-usage', async () => {
+    const db = adminDb()
+    const { data: clients, error } = await db.from('clients').select('id, over_limit, subscriptions(tier, minutes_package, status)')
+    if (error) throw error
+    const startOfMonth = new Date()
+    startOfMonth.setUTCDate(1)
+    startOfMonth.setUTCHours(0, 0, 0, 0)
+    const results = []
+    for (const client of clients || []) {
+      const subscription = Array.isArray(client.subscriptions) ? client.subscriptions.find((item: any) => item.status === 'active') || client.subscriptions[0] : client.subscriptions
+      const tier = String(subscription?.tier || 'free').toLowerCase()
+      const configuredLimit = Number(subscription?.minutes_package)
+      const limit = Number.isFinite(configuredLimit) && configuredLimit > 0 ? configuredLimit : (PLAN_LIMITS[tier] || PLAN_LIMITS.free)
+      const { data: usage, error: usageError } = await db.from('usage_events').select('quantity').eq('org_id', client.id).eq('type', 'voice_minute').gte('created_at', startOfMonth.toISOString())
+      if (usageError) throw usageError
+      const used = (usage || []).reduce((sum, row) => sum + Number(row.quantity || 0), 0)
+      const overLimit = used > limit
+      if (Boolean(client.over_limit) !== overLimit) await db.from('clients').update({ over_limit: overLimit }).eq('id', client.id)
+      results.push({ orgId: client.id, used, limit, overLimit })
+    }
+    return results
+  }),
+)
