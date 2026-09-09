@@ -34,6 +34,10 @@ export async function POST(request: Request) {
   }
 
   const adminClient = createAdminClient()
+  const resendKey = process.env.RESEND_API_KEY
+  if (!resendKey) {
+    return NextResponse.json({ error: 'Servizio email non configurato' }, { status: 503 })
+  }
   const passwordTemporanea = generaPasswordTemporanea()
 
   // Crea l'utente Auth direttamente con la password temporanea
@@ -41,6 +45,7 @@ export async function POST(request: Request) {
     email,
     password: passwordTemporanea,
     email_confirm: true,
+    user_metadata: { must_change_password: true, force_password_change: true, role, full_name: fullName || null },
   })
 
   if (erroreCreazione) {
@@ -56,11 +61,6 @@ export async function POST(request: Request) {
     must_change_password: true,
     created_by: user.id,
   })
-
-  const resendKey = process.env.RESEND_API_KEY
-  if (!resendKey) {
-    return NextResponse.json({ error: 'Servizio email non configurato' }, { status: 503 })
-  }
 
   // Invia l'email con le credenziali; l'SDK viene inizializzato solo quando la route viene chiamata.
   const resend = new Resend(resendKey)
