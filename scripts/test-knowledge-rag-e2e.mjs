@@ -24,7 +24,8 @@ function chunks(text) {
 async function supa(path, options = {}) {
   const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, { ...options, headers: { ...headers, ...(options.headers || {}) } })
   if (!response.ok) throw new Error(`Supabase ${response.status}: ${await response.text()}`)
-  return response.status === 204 ? null : response.json()
+  const body = await response.text()
+  return body ? JSON.parse(body) : null
 }
 async function embed(input) {
   const response = await fetch('https://api.openai.com/v1/embeddings', { method: 'POST', headers: { Authorization: `Bearer ${openaiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'text-embedding-3-small', input }) })
@@ -48,6 +49,7 @@ try {
   const webhookBody = await webhook.json()
   if (webhook.status !== 200) throw new Error(`Webhook ${webhook.status}: ${JSON.stringify(webhookBody)}`)
   if (!webhookBody.reply) throw new Error(`Risposta RAG assente: ${JSON.stringify(webhookBody)}`)
+  if (!webhookBody.rag_matches) throw new Error(`Nessun chunk RAG recuperato: ${JSON.stringify(webhookBody)}`)
   const persisted = await supa(`messages?select=provider_message_id,body&org_id=eq.${orgId}&provider_message_id=eq.${providerMessageId}`)
   console.log(JSON.stringify({ ok: true, firecrawl: { url, characters: text.length }, embeddings: { model: 'text-embedding-3-small', chunks: parts.length }, webhook: webhookBody, persistedMessages: persisted.length, observability: { sentryHelperInvoked: true, langfuseConfigured: Boolean(process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY) } }, null, 2))
 } finally {

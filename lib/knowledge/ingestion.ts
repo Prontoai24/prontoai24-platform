@@ -92,7 +92,7 @@ export async function retrieveKnowledge(orgId: string, query: string, limit = 6)
   const embeddings = await embedTexts([query])
   if (embeddings?.[0]) {
     const admin = createAdminClient()
-    const { data, error } = await admin.rpc('match_knowledge_chunks', { query_embedding: `[${embeddings[0].join(',')}]`, match_org_id: orgId, match_count: limit })
+    const { data, error } = await admin.rpc('match_knowledge_chunks', { query_embedding: `[${embeddings[0].join(',')}]`, match_org_id: orgId, match_threshold: Number(process.env.RAG_MATCH_THRESHOLD || 0.35), match_count: limit })
     if (error) throw error
     return data || []
   }

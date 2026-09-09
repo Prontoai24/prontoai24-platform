@@ -248,6 +248,22 @@ async function handleMessaging(provider: 'whatsapp' | 'webchat', payload: JsonOb
   captureObservedMessage(`${provider} message received`, 'info', orgId, { conversationId: conversationExternalId, providerMessageId })
   await recordChannelEvent(provider, 'message.received', { orgId, sessionId: conversationExternalId, feature: `${provider}-inbox` }, { providerMessageId, bodyLength: body.length })
   const generated = await generateKnowledgeReply(orgId, body)
+  if (generated.usage) {
+    await adminClient.from('ai_usage_events').insert({
+      org_id: orgId,
+      channel: provider,
+      provider: 'openai',
+      model: generated.usage.model,
+      request_id: providerMessageId || crypto.randomUUID(),
+      input_tokens: generated.usage.inputTokens,
+      output_tokens: generated.usage.outputTokens,
+      total_tokens: generated.usage.totalTokens,
+      latency_ms: generated.usage.latencyMs,
+      cost_usd: generated.usage.costUsd,
+      status: generated.reply ? 'success' : 'error',
+      metadata: { rag_matches: generated.matches },
+    })
+  }
   await recordChannelEvent(provider, 'rag.reply.generated', { orgId, sessionId: conversationExternalId, feature: `${provider}-rag` }, { providerMessageId, matches: generated.matches, hasReply: Boolean(generated.reply) })
   return NextResponse.json({ received: true, org_id: orgId, conversation_id: conversationExternalId, message_id: providerMessageId, reply: generated.reply, rag_matches: generated.matches })
 }
