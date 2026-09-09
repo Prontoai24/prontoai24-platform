@@ -53,3 +53,18 @@ export async function PATCH(request: Request, { params }: RouteContext) {
   }
   return NextResponse.json({ success: true, profile })
 }
+
+export async function DELETE(_request: Request, { params }: RouteContext) {
+  const auth = await requireSuperAdmin()
+  if ('error' in auth) return auth.error
+  if (!params.id || params.id === auth.user.id) return NextResponse.json({ error: 'Non puoi eliminare il tuo account Super Admin.' }, { status: 400 })
+
+  const admin = createAdminClient()
+  const { data: target, error: targetError } = await admin.from('profiles').select('id, role').eq('id', params.id).single()
+  if (targetError || !target) return NextResponse.json({ error: 'Account non trovato.' }, { status: 404 })
+  if (target.role === 'super_admin') return NextResponse.json({ error: 'Un account Super Admin non può essere eliminato da questa schermata.' }, { status: 403 })
+
+  const { error } = await admin.auth.admin.deleteUser(params.id)
+  if (error) return NextResponse.json({ error: `Eliminazione Auth non riuscita: ${error.message}` }, { status: 500 })
+  return NextResponse.json({ success: true, deletedId: params.id })
+}
