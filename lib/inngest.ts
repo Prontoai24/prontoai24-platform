@@ -33,3 +33,60 @@ export const syncUsage = inngest.createFunction(
     const { clientId, minutesUsed } = event.data as { clientId: string; minutesUsed: number }; const db = adminDb(); const { data: subscription, error: readError } = await db.from('subscriptions').select('id, minutes_used_current_period').eq('client_id', clientId).eq('status', 'active').single(); if (readError || !subscription) throw readError || new Error('Active subscription not found'); const total = Number(subscription.minutes_used_current_period) + Number(minutesUsed); const { error } = await db.from('subscriptions').update({ minutes_used_current_period: total, updated_at: new Date().toISOString() }).eq('id', subscription.id); if (error) throw error; return { clientId, subscriptionId: subscription.id, minutesUsed: total }
   })
 )
+
+
+export const processKnowledgeIngestion = inngest.createFunction(
+  {
+    id: 'process-knowledge-ingestion',
+    name: 'Process Knowledge Base source',
+    retries: 2,
+  },
+  { event: 'knowledge/source.created' },
+  async ({ event, step }) => {
+    const { sourceId, orgId, type, sourceValue, fileName, mimeType, contentHash: precomputedHash } = event.data as {
+      sourceId: string
+      orgId: string
+      type: 'url' | 'file'
+      sourceValue: string
+      fileName?: string
+      mimeType?: string
+      contentHash?: string
+    }
+    const db = adminDb()
+
+    return step.run('extract-and-index-knowledge', async () => {
+      await db.from('knowledge_sources').update({ status: 'processing', error_message: null, updated_at: new Date().toISOString() }).eq('id', sourceId).eq('org_id', orgId)
+      try {
+        const { contentHash, crawlUrl, indexKnowledgeSource, parseFile } = await import('@/lib/knowledge/ingestion')
+        let text: string
+        let metadata: Record<string, unknown> = {}
+        if (type === 'url') {
+          text = await crawlUrl(sourceValue)
+          metadata = { url: sourceValue, crawler: process.env.FIRECRAWL_API_KEY ? 'firecrawl' : 'direct-fetch-fallback' }
+        } else {
+          const { getKnowledgeObject } = await import('@/lib/storage/r2')
+          const object = await getKnowledgeObject(sourceValue)
+          const fileBytes = new Uint8Array(object.bytes.byteLength)
+          fileBytes.set(object.bytes)
+          const file = new File([fileBytes.buffer], fileName || sourceValue.split('/').pop() || 'document', { type: mimeType || object.contentType })
+          text = await parseFile(file)
+          metadata = { file_name: file.name, mime_type: file.type || null, storage_path: sourceValue, storage_provider: 'cloudflare-r2' }
+        }
+        const hash = precomputedHash || contentHash(text)
+        const { data: duplicate } = await db.from('knowledge_sources').select('id,type,source_value,status,content_hash,created_at,updated_at').eq('org_id', orgId).eq('content_hash', hash).eq('status', 'ready').neq('id', sourceId).maybeSingle()
+        if (duplicate) {
+          await db.from('knowledge_sources').delete().eq('id', sourceId).eq('org_id', orgId)
+          return { sourceId, orgId, duplicate: true, duplicateSourceId: duplicate.id }
+        }
+        const result = await indexKnowledgeSource(sourceId, orgId, text, metadata, hash)
+        return { sourceId, orgId, ...result }
+      } catch (error) {
+        const message = error instanceof Error ? error.message.slice(0, 1000) : 'Indicizzazione fallita'
+        console.error('[knowledge] async ingestion failed', { sourceId, orgId, message })
+        const { error: updateError } = await db.from('knowledge_sources').update({ status: 'error', error_message: message, updated_at: new Date().toISOString() }).eq('id', sourceId).eq('org_id', orgId)
+        if (updateError) console.error('[knowledge] failed to persist error state', { sourceId, error: updateError.message })
+        throw error
+      }
+    })
+  },
+)
