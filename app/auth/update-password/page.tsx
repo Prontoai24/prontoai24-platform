@@ -4,9 +4,8 @@ export const dynamic = 'force-dynamic'
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { Check, KeyRound, LockKeyhole, ArrowLeft } from 'lucide-react'
-import { createClient } from '@/lib/supabase/client'
+import { completeFirstAccess } from './actions'
 
 const SPECIAL_CHARACTER_REGEX = /[^A-Za-z0-9\s]/
 const passwordRules = [
@@ -22,7 +21,6 @@ export default function CambioPasswordObbligatorio() {
   const [errore, setErrore] = useState<string | null>(null)
   const [successo, setSuccesso] = useState<string | null>(null)
   const [caricamento, setCaricamento] = useState(false)
-  const router = useRouter()
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); setErrore(null); setSuccesso(null)
@@ -30,18 +28,12 @@ export default function CambioPasswordObbligatorio() {
     if (nuovaPassword !== conferma) return setErrore('Le password non coincidono.')
     setCaricamento(true)
     try {
-      const client = createClient()
-      const { data: { session } } = await client.auth.getSession()
-      if (!session?.access_token) throw new Error('Sessione di primo accesso non disponibile. Torna al login e riprova.')
-      const response = await fetch('/api/auth/complete-password', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ password: nuovaPassword }), cache: 'no-store' })
-      const body = await response.json().catch(() => ({}))
-      if (!response.ok || body.profileCompleted !== true) throw new Error(body.error || 'Impossibile completare il profilo.')
-      // La route server ha già invalidato i cookie HTTP-only; questo pulisce anche
-      // lo storage del client Supabase e impedisce il riuso del token corrente.
-      await client.auth.signOut({ scope: 'global' }).catch(() => {})
-      setSuccesso('Password aggiornata con successo. Effettua il login con la nuova password.')
-      window.setTimeout(() => window.location.replace('/login?updated=true'), 700)
+      const result = await completeFirstAccess(nuovaPassword)
+      if (!result?.success) throw new Error(result?.error || 'Impossibile completare il profilo.')
     } catch (error) {
+      // Next.js usa un'eccezione interna per redirect(); non va mostrata come errore
+      // se la Server Action ha già completato la procedura.
+      if (error && typeof error === 'object' && 'digest' in error && String(error.digest).startsWith('NEXT_REDIRECT')) return
       setErrore(error instanceof Error ? error.message : 'Si è verificato un errore durante il salvataggio. Riprova.')
     } finally { setCaricamento(false) }
   }
