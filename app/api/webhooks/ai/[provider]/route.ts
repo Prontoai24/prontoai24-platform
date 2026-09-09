@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
 import { captureObservedException, captureObservedMessage } from '@/lib/observability/sentry'
-import { recordVoiceEvent } from '@/lib/observability/langfuse'
+import { recordChannelEvent, recordVoiceEvent } from '@/lib/observability/langfuse'
 
 export const dynamic = 'force-dynamic'
+
+type JsonObject = Record<string, any>
 
 function firstString(...values: unknown[]) {
   return values.find((value): value is string => typeof value === 'string' && value.length > 0) || null
@@ -32,94 +34,174 @@ function transcriptText(value: unknown): string | null {
   }).filter(Boolean).join('\n') || null
 }
 
+function resolveOrgFromPayload(payload: JsonObject, message: JsonObject) {
+  return firstString(
+    payload.org_id,
+    payload.client_id,
+    payload.tenantId,
+    payload.tenant_id,
+    payload.metadata?.org_id,
+    payload.metadata?.client_id,
+    message.metadata?.org_id,
+    message.metadata?.client_id,
+  )
+}
+
+async function handleVoice(payload: JsonObject, adminClient: ReturnType<typeof createAdminClient>) {
+  const message = (payload.message || payload) as JsonObject
+  const call = (message.call || {}) as JsonObject
+  const artifact = (message.artifact || call.artifact || {}) as JsonObject
+  const assistant = (message.assistant || call.assistant || {}) as JsonObject
+  const phone = (message.phoneNumber || call.phoneNumber || {}) as JsonObject
+  const event = firstString(message.type, payload.type, payload.event) || 'unknown'
+  const providerCallId = firstString(call.id, message.callId, payload.callId)
+  const assistantId = firstString(call.assistantId, call.assistant_id, assistant.id, payload.assistantId, payload.metadata?.assistantId)
+  const phoneId = firstString(call.phoneNumberId, call.phone_number_id, phone.id, payload.phoneNumberId)
+  const phoneNumber = firstString(phone.number, call.customer?.number, call.from_number, call.to_number)
+  let orgId = resolveOrgFromPayload(payload, message)
+
+  if (!orgId && (assistantId || phoneId || phoneNumber)) {
+    const filters = [
+      phoneId ? `vapi_phone_id.eq.${phoneId}` : null,
+      assistantId ? `vapi_assistant_id.eq.${assistantId}` : null,
+      phoneNumber ? `phone_number.eq.${phoneNumber}` : null,
+    ].filter(Boolean).join(',')
+    if (filters) {
+      const { data: mapped } = await adminClient.from('phone_numbers').select('client_id').or(filters).maybeSingle()
+      orgId = mapped?.client_id || null
+    }
+  }
+
+  if (!orgId) {
+    captureObservedMessage('Vapi webhook tenant non risolto', 'warning', 'default', { event, providerCallId, assistantId, phoneId })
+    await adminClient.from('audit_logs').insert({ action: 'vapi.webhook.ignored', entity_type: 'vapi', metadata: { event, providerCallId, assistantId, phoneId, reason: 'tenant non risolto' } })
+    return NextResponse.json({ received: true, ignored: 'tenantId/org_id non risolto' })
+  }
+
+  const conversationId = firstString(call.conversationId, call.conversation_id, message.conversationId, payload.conversationId, providerCallId)!
+  const transcript = transcriptText(message.transcript || call.transcript || artifact.transcript || artifact.transcriptText || artifact.messages)
+  const recording = (artifact.recording || {}) as JsonObject
+  const recordingUrl = firstString(recording.url, recording.mono?.url, recording.stereoUrl, call.recording_url, call.recordingUrl)
+  const duration = Math.round(numberValue(call.durationSeconds, call.duration_seconds, call.duration, artifact.durationSeconds))
+  const startedAt = isoDate(call.startedAt || call.started_at || message.startedAt)
+  const endedAt = isoDate(call.endedAt || call.ended_at || message.endedAt)
+  const endedReason = firstString(message.endedReason, call.endedReason, call.ended_reason)
+
+  const { data: existing } = await adminClient.from('calls').select('id').eq('org_id', orgId).eq('provider_call_id', providerCallId).maybeSingle()
+  const callRecord = {
+    org_id: orgId,
+    provider_call_id: providerCallId,
+    conversation_id: conversationId,
+    recording_url: recordingUrl,
+    duration,
+    started_at: startedAt,
+    ended_at: endedAt,
+    direction: firstString(call.direction) || 'inbound',
+    from_number: firstString(call.customer?.number, call.from_number),
+    to_number: firstString(phone.number, call.to_number),
+    status: event,
+    ended_reason: endedReason,
+    updated_at: new Date().toISOString(),
+  }
+  const callQuery = existing ? adminClient.from('calls').update(callRecord).eq('id', existing.id) : adminClient.from('calls').insert(callRecord)
+  const { error: callError } = await callQuery
+  if (callError) throw callError
+
+  if (transcript || event === 'transcript' || event === 'end-of-call-report') {
+    const { data: conversation } = await adminClient.from('conversations').select('transcript').eq('org_id', orgId).eq('conversation_id', conversationId).maybeSingle()
+    const mergedTranscript = transcript || conversation?.transcript || null
+    const { error: conversationError } = await adminClient.from('conversations').upsert({ org_id: orgId, conversation_id: conversationId, channel: 'voice', transcript: mergedTranscript, updated_at: new Date().toISOString() }, { onConflict: 'org_id,conversation_id' })
+    if (conversationError) throw conversationError
+  }
+
+  await adminClient.from('audit_logs').insert({ action: `vapi.webhook.${event}`, entity_type: 'vapi', metadata: { orgId, providerCallId, conversationId, duration, hasTranscript: Boolean(transcript), hasRecording: Boolean(recordingUrl) } })
+  captureObservedMessage(`Vapi voice event: ${event}`, 'info', orgId, { providerCallId, conversationId, duration })
+  await recordVoiceEvent(event, { orgId, sessionId: conversationId, feature: 'vapi-voice' }, { providerCallId, duration, hasTranscript: Boolean(transcript), hasRecording: Boolean(recordingUrl) })
+  return NextResponse.json({ received: true, org_id: orgId, conversation_id: conversationId, event })
+}
+
+async function handleMessaging(provider: 'whatsapp' | 'webchat', payload: JsonObject, adminClient: ReturnType<typeof createAdminClient>) {
+  const message = (provider === 'whatsapp'
+    ? payload.entry?.[0]?.changes?.[0]?.value?.messages?.[0] || payload.message || payload.messages?.[0] || payload
+    : payload.message || payload) as JsonObject
+  let orgId = resolveOrgFromPayload(payload, message)
+  const providerMessageId = firstString(message.id, message.message_id, payload.message_id, payload.id)
+  const sender = firstString(message.from, message.sender?.id, message.sender?.phone, payload.from, payload.sender)
+  const recipient = firstString(message.to, message.recipient?.id, payload.to, payload.recipient)
+  const body = firstString(message.text?.body, message.text, message.body, message.content?.text, payload.text, payload.body) || ''
+  const occurredAt = isoDate(message.timestamp || message.created_at || payload.timestamp) || new Date().toISOString()
+
+  if (!orgId && provider === 'whatsapp' && (recipient || sender)) {
+    const phone = recipient || sender
+    const { data: mapped } = await adminClient.from('phone_numbers').select('client_id').eq('phone_number', phone).maybeSingle()
+    orgId = mapped?.client_id || null
+  }
+
+  if (!orgId) {
+    captureObservedMessage(`${provider} webhook tenant non risolto`, 'warning', 'default', { providerMessageId, sender, recipient })
+    await adminClient.from('audit_logs').insert({ action: `${provider}.webhook.ignored`, entity_type: provider, metadata: { providerMessageId, reason: 'org_id non risolto' } })
+    return NextResponse.json({ received: true, ignored: 'org_id non risolto' })
+  }
+
+  if (providerMessageId) {
+    const { data: duplicate } = await adminClient.from('messages').select('id').eq('provider', provider).eq('provider_message_id', providerMessageId).maybeSingle()
+    if (duplicate) return NextResponse.json({ received: true, duplicate: true, org_id: orgId })
+  }
+
+  const conversationExternalId = firstString(
+    payload.conversation_id,
+    payload.conversationId,
+    message.conversation_id,
+    message.conversationId,
+    message.context?.conversation_id,
+    sender ? `${provider}:${sender}` : providerMessageId,
+  )!
+
+  const { data: existingConversation } = await adminClient.from('conversations').select('id,transcript').eq('org_id', orgId).eq('conversation_id', conversationExternalId).maybeSingle()
+  const mergedTranscript = [existingConversation?.transcript, body].filter(Boolean).join('\n') || null
+  const conversationPayload = { org_id: orgId, conversation_id: conversationExternalId, channel: provider, transcript: mergedTranscript, updated_at: new Date().toISOString() }
+  const conversationQuery = existingConversation
+    ? adminClient.from('conversations').update(conversationPayload).eq('id', existingConversation.id).select('id').single()
+    : adminClient.from('conversations').insert(conversationPayload).select('id').single()
+  const { data: conversation, error: conversationError } = await conversationQuery
+  if (conversationError || !conversation) throw conversationError || new Error('Conversazione non creata')
+
+  const { error: messageError } = await adminClient.from('messages').insert({
+    org_id: orgId,
+    conversation_id: conversation.id,
+    provider,
+    provider_message_id: providerMessageId,
+    direction: firstString(message.direction, payload.direction) === 'outbound' ? 'outbound' : 'inbound',
+    sender,
+    recipient,
+    body,
+    status: firstString(message.status, payload.status) || 'received',
+    metadata: { event: payload.type || payload.event || null, raw_type: message.type || null },
+    occurred_at: occurredAt,
+  })
+  if (messageError) throw messageError
+
+  await adminClient.from('audit_logs').insert({ action: `${provider}.webhook.message`, entity_type: provider, metadata: { orgId, conversationId: conversationExternalId, providerMessageId } })
+  captureObservedMessage(`${provider} message received`, 'info', orgId, { conversationId: conversationExternalId, providerMessageId })
+  await recordChannelEvent(provider, 'message.received', { orgId, sessionId: conversationExternalId, feature: `${provider}-inbox` }, { providerMessageId, bodyLength: body.length })
+  return NextResponse.json({ received: true, org_id: orgId, conversation_id: conversationExternalId, message_id: providerMessageId })
+}
+
 export async function POST(request: Request, context: { params: { provider: string } }) {
   const provider = context.params.provider.toLowerCase()
-  if (!['vapi', 'telnyx', 'whatsapp'].includes(provider)) return NextResponse.json({ error: 'Provider non supportato' }, { status: 404 })
+  if (!['vapi', 'telnyx', 'whatsapp', 'webchat'].includes(provider)) return NextResponse.json({ error: 'Provider non supportato' }, { status: 404 })
 
   const expected = process.env.AI_WEBHOOK_SECRET
-  const receivedSecret = request.headers.get('x-prontoai-webhook-secret') || request.headers.get('x-vapi-secret')
+  const receivedSecret = request.headers.get('x-prontoai-webhook-secret') || request.headers.get('x-vapi-secret') || request.headers.get('x-webhook-secret')
   if (expected && receivedSecret !== expected) return NextResponse.json({ error: 'Firma webhook non valida' }, { status: 401 })
 
   try {
-    const payload = await request.json() as Record<string, any>
+    const payload = await request.json() as JsonObject
     const adminClient = createAdminClient()
-    if (provider !== 'vapi') {
-      await adminClient.from('audit_logs').insert({ action: `${provider}.webhook.received`, entity_type: provider, metadata: { event: payload.type || payload.event || null } })
-      return NextResponse.json({ received: true })
-    }
-
-    const message = (payload.message || payload) as Record<string, any>
-    const call = (message.call || {}) as Record<string, any>
-    const artifact = (message.artifact || call.artifact || {}) as Record<string, any>
-    const assistant = (message.assistant || call.assistant || {}) as Record<string, any>
-    const phone = (message.phoneNumber || call.phoneNumber || {}) as Record<string, any>
-    const event = firstString(message.type, payload.type, payload.event) || 'unknown'
-    const providerCallId = firstString(call.id, message.callId, payload.callId)
-    const assistantId = firstString(call.assistantId, call.assistant_id, assistant.id, payload.assistantId, payload.metadata?.assistantId)
-    const phoneId = firstString(call.phoneNumberId, call.phone_number_id, phone.id, payload.phoneNumberId)
-    const phoneNumber = firstString(phone.number, call.customer?.number, call.from_number, call.to_number)
-    let orgId = firstString(payload.org_id, payload.client_id, payload.tenantId, payload.tenant_id, payload.metadata?.org_id, payload.metadata?.client_id, message.metadata?.org_id, message.metadata?.client_id)
-
-    if (!orgId && (assistantId || phoneId || phoneNumber)) {
-      const filters = [
-        phoneId ? `vapi_phone_id.eq.${phoneId}` : null,
-        assistantId ? `vapi_assistant_id.eq.${assistantId}` : null,
-        phoneNumber ? `phone_number.eq.${phoneNumber}` : null,
-      ].filter(Boolean).join(',')
-      if (filters) {
-        const { data: mapped } = await adminClient.from('phone_numbers').select('client_id').or(filters).maybeSingle()
-        orgId = mapped?.client_id || null
-      }
-    }
-
-    if (!orgId) {
-      captureObservedMessage('Vapi webhook tenant non risolto', 'warning', 'default', { event, providerCallId, assistantId, phoneId })
-      await adminClient.from('audit_logs').insert({ action: 'vapi.webhook.ignored', entity_type: 'vapi', metadata: { event, providerCallId, assistantId, phoneId, reason: 'tenant non risolto' } })
-      return NextResponse.json({ received: true, ignored: 'tenantId/org_id non risolto' })
-    }
-
-    const conversationId = firstString(call.conversationId, call.conversation_id, message.conversationId, payload.conversationId, providerCallId)!
-    const transcript = transcriptText(message.transcript || call.transcript || artifact.transcript || artifact.transcriptText || artifact.messages)
-    const recording = (artifact.recording || {}) as Record<string, any>
-    const recordingUrl = firstString(recording.url, recording.mono?.url, recording.stereoUrl, call.recording_url, call.recordingUrl)
-    const duration = Math.round(numberValue(call.durationSeconds, call.duration_seconds, call.duration, artifact.durationSeconds))
-    const startedAt = isoDate(call.startedAt || call.started_at || message.startedAt)
-    const endedAt = isoDate(call.endedAt || call.ended_at || message.endedAt)
-    const endedReason = firstString(message.endedReason, call.endedReason, call.ended_reason)
-
-    const { data: existing } = await adminClient.from('calls').select('id').eq('org_id', orgId).eq('provider_call_id', providerCallId).maybeSingle()
-    const callRecord = {
-      org_id: orgId,
-      provider_call_id: providerCallId,
-      conversation_id: conversationId,
-      recording_url: recordingUrl,
-      duration,
-      started_at: startedAt,
-      ended_at: endedAt,
-      direction: firstString(call.direction) || 'inbound',
-      from_number: firstString(call.customer?.number, call.from_number),
-      to_number: firstString(phone.number, call.to_number),
-      status: event,
-      ended_reason: endedReason,
-      updated_at: new Date().toISOString(),
-    }
-    const callQuery = existing
-      ? adminClient.from('calls').update(callRecord).eq('id', existing.id)
-      : adminClient.from('calls').insert(callRecord)
-    const { error: callError } = await callQuery
-    if (callError) throw callError
-
-    if (transcript || event === 'transcript' || event === 'end-of-call-report') {
-      const { data: conversation } = await adminClient.from('conversations').select('transcript').eq('org_id', orgId).eq('conversation_id', conversationId).maybeSingle()
-      const mergedTranscript = transcript || conversation?.transcript || null
-      const { error: conversationError } = await adminClient.from('conversations').upsert({ org_id: orgId, conversation_id: conversationId, channel: 'voice', transcript: mergedTranscript, updated_at: new Date().toISOString() }, { onConflict: 'org_id,conversation_id' })
-      if (conversationError) throw conversationError
-    }
-
-    await adminClient.from('audit_logs').insert({ action: `vapi.webhook.${event}`, entity_type: 'vapi', metadata: { orgId, providerCallId, conversationId, duration, hasTranscript: Boolean(transcript), hasRecording: Boolean(recordingUrl) } })
-    captureObservedMessage(`Vapi voice event: ${event}`, 'info', orgId, { providerCallId, conversationId, duration })
-    await recordVoiceEvent(event, { orgId, sessionId: conversationId, feature: 'vapi-voice' }, { providerCallId, duration, hasTranscript: Boolean(transcript), hasRecording: Boolean(recordingUrl) })
-    return NextResponse.json({ received: true, org_id: orgId, conversation_id: conversationId, event })
+    if (provider === 'vapi') return handleVoice(payload, adminClient)
+    if (provider === 'whatsapp' || provider === 'webchat') return handleMessaging(provider, payload, adminClient)
+    await adminClient.from('audit_logs').insert({ action: `${provider}.webhook.received`, entity_type: provider, metadata: { event: payload.type || payload.event || null } })
+    return NextResponse.json({ received: true })
   } catch (error) {
     captureObservedException(error, 'default', { provider, endpoint: 'webhooks/ai' })
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Webhook processing failed' }, { status: 500 })
