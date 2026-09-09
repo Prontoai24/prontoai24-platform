@@ -18,8 +18,9 @@ export function chunkText(text: string) {
   return chunks
 }
 
-export function contentHash(text: string) {
-  return crypto.createHash('sha256').update(text).digest('hex')
+export function contentHash(content: string | Buffer | Uint8Array) {
+  const value = typeof content === 'string' ? content.replace(/\s+/g, ' ').trim() : content
+  return crypto.createHash('sha256').update(value).digest('hex')
 }
 
 export async function crawlUrl(url: string) {
@@ -74,7 +75,7 @@ export async function embedTexts(texts: string[]) {
   return (data.data || []).sort((a: any, b: any) => a.index - b.index).map((item: any) => item.embedding as number[])
 }
 
-export async function indexKnowledgeSource(sourceId: string, orgId: string, text: string, metadata: Record<string, unknown> = {}) {
+export async function indexKnowledgeSource(sourceId: string, orgId: string, text: string, metadata: Record<string, unknown> = {}, precomputedHash?: string) {
   const admin = createAdminClient()
   const chunks = chunkText(text)
   if (!chunks.length) throw new Error('Nessun testo estraibile')
@@ -83,7 +84,7 @@ export async function indexKnowledgeSource(sourceId: string, orgId: string, text
   const rows = chunks.map((content, index) => ({ source_id: sourceId, org_id: orgId, chunk_index: index, content, embedding: embeddings?.[index] ? `[${embeddings[index].join(',')}]` : null, metadata }))
   const { error } = await admin.from('knowledge_chunks').insert(rows)
   if (error) throw error
-  const { error: sourceError } = await admin.from('knowledge_sources').update({ status: embeddings ? 'ready' : 'error', error_message: embeddings ? null : 'OPENAI_API_KEY non configurata: contenuto estratto ma embedding non creato', content_hash: contentHash(text), updated_at: new Date().toISOString() }).eq('id', sourceId)
+  const { error: sourceError } = await admin.from('knowledge_sources').update({ status: embeddings ? 'ready' : 'error', error_message: embeddings ? null : 'OPENAI_API_KEY non configurata: contenuto estratto ma embedding non creato', content_hash: precomputedHash || contentHash(text), updated_at: new Date().toISOString() }).eq('id', sourceId)
   if (sourceError) throw sourceError
   return { chunks: chunks.length, embedded: Boolean(embeddings) }
 }
