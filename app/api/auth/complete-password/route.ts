@@ -1,23 +1,35 @@
 import { NextResponse } from 'next/server'
-import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { createServerClient, type CookieOptions } from '@supabase/ssr'
+import { createAdminClient } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
+type CookieMutation = { name: string; value: string; options: CookieOptions }
 
 function jsonError(error: string, status: number) {
   return NextResponse.json({ error, profileCompleted: false }, { status, headers: { 'Cache-Control': 'no-store' } })
 }
 
 export async function POST(request: Request) {
-  const supabase = createClient()
+  const cookieHeader = request.headers.get('cookie') || ''
+  const mutations: CookieMutation[] = []
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) { return cookieHeader.split('; ').find((value) => value.startsWith(`${name}=`))?.split('=').slice(1).join('=') },
+        set(name: string, value: string, options: CookieOptions) { mutations.push({ name, value, options }) },
+        remove(name: string, options: CookieOptions) { mutations.push({ name, value: '', options: { ...options, maxAge: 0 } }) },
+      },
+    }
+  )
   const { data: { user }, error: authError } = await supabase.auth.getUser()
   if (authError || !user) return jsonError('Sessione non valida o scaduta. Effettua nuovamente il login.', 401)
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return jsonError('Configurazione server incompleta: SUPABASE_SERVICE_ROLE_KEY mancante.', 503)
 
   const body = await request.json().catch(() => ({}))
   const password = typeof body.password === 'string' ? body.password : ''
-  if (password.length < 8 || !/[A-Z]/.test(password) || !/[0-9]/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
-    return jsonError('La nuova password non rispetta i requisiti di sicurezza.', 400)
-  }
+  if (password.length < 8 || !/[A-Z]/.test(password) || !/[0-9]/.test(password) || !/[^A-Za-z0-9]/.test(password)) return jsonError('La nuova password non rispetta i requisiti di sicurezza.', 400)
 
   try {
     const adminClient = createAdminClient()
@@ -36,9 +48,11 @@ export async function POST(request: Request) {
     if (profileError) return jsonError(`Password aggiornata, ma il profilo non è stato completato: ${profileError.message}`, 500)
     if (!profile || profile.must_change_password !== false) return jsonError('Il profilo non è stato completato correttamente.', 500)
 
-    // Invalida i cookie Supabase HTTP-only nella risposta server-side.
     await supabase.auth.signOut({ scope: 'global' })
-    return NextResponse.json({ success: true, profileCompleted: true, userId: user.id, mustChangePassword: false, signedOut: true }, { headers: { 'Cache-Control': 'no-store' } })
+    mutations.push({ name: 'sb-session-reset', value: '1', options: { path: '/', maxAge: 10, httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' } })
+    const response = NextResponse.json({ success: true, profileCompleted: true, userId: user.id, mustChangePassword: false, signedOut: true }, { headers: { 'Cache-Control': 'no-store' } })
+    for (const mutation of mutations) response.cookies.set({ name: mutation.name, value: mutation.value, ...mutation.options })
+    return response
   } catch (error) {
     return jsonError(error instanceof Error ? `Errore server nel completamento profilo: ${error.message}` : 'Errore server nel completamento profilo.', 500)
   }
