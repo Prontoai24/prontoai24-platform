@@ -61,3 +61,19 @@ Le chiavi sono server-side. Non esporle in componenti client, `.env.example` con
 ## Osservabilità
 
 Gli errori di ingestione vengono inviati agli helper Sentry con `org_id`; l’endpoint può essere ulteriormente tracciato su Langfuse quando il retrieval viene usato insieme a una chiamata LLM. I log non devono includere documenti completi, token API o dati personali non necessari.
+
+## Stato integrazione webhook
+
+Per WhatsApp e Web Chat, ogni messaggio in ingresso viene indicizzato e passato a `generateKnowledgeReply`: la risposta viene restituita al consumer nel campo `reply`, già generata con il contesto filtrato per `org_id`.
+
+Per Vapi, gli eventi vocali ricevuti dal webhook producono il campo `rag_system_prompt` con il contesto tenant. Il webhook Vapi non può modificare retroattivamente il system prompt di una chiamata già in corso: per applicarlo durante la conversazione, il consumer Vapi deve usare il server URL/tool di richiesta assistente e applicare il prompt dinamico come assistant override. Il callback di report/fine chiamata resta utile per audit e arricchimento, non per cambiare il prompt della chiamata conclusa.
+
+## Smoke test reale
+
+Il runner è:
+
+```bash
+npm run test:knowledge-rag
+```
+
+Esegue Firecrawl, embedding OpenAI, scrittura su `knowledge_sources`/`knowledge_chunks`, webhook Web Chat, retrieval pgvector, risposta OpenAI e cleanup delle fixture. Nel test eseguito il crawling Firecrawl è arrivato correttamente al passaggio embedding; OpenAI ha risposto `429 credit_balance_exhausted`, quindi la risposta contestualizzata non ha potuto essere generata. Dopo il test la fixture tenant è stata eliminata.

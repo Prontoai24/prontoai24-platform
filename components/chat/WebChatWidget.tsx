@@ -69,6 +69,7 @@ export default function WebChatWidget({
       })
       const result = await response.json().catch(() => ({}))
       if (!response.ok || result.ignored) throw new Error(result.error || result.ignored || 'Messaggio non inviato')
+      if (result.reply) setMessages((current) => [...current, { id: `${messageId}-reply`, body: result.reply, direction: 'inbound' }])
     } catch (submitError) {
       setMessages((current) => current.filter((item) => item.id !== messageId))
       setError(submitError instanceof Error ? submitError.message : 'Messaggio non inviato')
