@@ -1,3 +1,4 @@
+import crypto from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
 import { captureObservedException, captureObservedMessage } from '@/lib/observability/sentry'
@@ -6,6 +7,66 @@ import { recordChannelEvent, recordVoiceEvent } from '@/lib/observability/langfu
 export const dynamic = 'force-dynamic'
 
 type JsonObject = Record<string, any>
+
+type RateEntry = { count: number; resetAt: number }
+const rateEntries = new Map<string, RateEntry>()
+
+function rateLimit(request: Request, provider: string) {
+  const max = Number(process.env.WEBHOOK_RATE_LIMIT_MAX || 120)
+  const windowMs = Number(process.env.WEBHOOK_RATE_LIMIT_WINDOW_MS || 60_000)
+  const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+  const ip = forwarded || request.headers.get('x-real-ip') || 'unknown'
+  const key = `${provider}:${ip}`
+  const now = Date.now()
+  const current = rateEntries.get(key)
+  if (!current || current.resetAt <= now) {
+    rateEntries.set(key, { count: 1, resetAt: now + windowMs })
+    return null
+  }
+  current.count += 1
+  if (current.count > max) {
+    return Math.max(1, Math.ceil((current.resetAt - now) / 1000))
+  }
+  return null
+}
+
+function safeEqual(left: string, right: string) {
+  const a = Buffer.from(left)
+  const b = Buffer.from(right)
+  return a.length === b.length && crypto.timingSafeEqual(a, b)
+}
+
+function validHmac(rawBody: string, received: string | null, secret: string | undefined) {
+  if (!secret || !received) return false
+  const digest = crypto.createHmac('sha256', secret).update(rawBody, 'utf8').digest('hex')
+  const normalized = received.trim().replace(/^sha256=/i, '')
+  return safeEqual(normalized.toLowerCase(), digest.toLowerCase())
+}
+
+function authenticatedWebhook(provider: string, request: Request, rawBody: string) {
+  const sharedSecret = process.env.AI_WEBHOOK_SECRET
+  const sharedReceived = request.headers.get('x-prontoai-webhook-secret') || request.headers.get('x-webhook-secret')
+  const allowFallback = process.env.WEBHOOK_ALLOW_SHARED_SECRET_FALLBACK === 'true'
+  const sharedValid = Boolean(sharedSecret && sharedReceived && safeEqual(sharedReceived, sharedSecret))
+
+  if (provider === 'whatsapp') {
+    const signature = request.headers.get('x-hub-signature-256')
+    const hmacValid = validHmac(rawBody, signature, process.env.WHATSAPP_APP_SECRET)
+    return hmacValid || (allowFallback && sharedValid)
+  }
+  if (provider === 'vapi') {
+    const signature = request.headers.get('x-vapi-signature') || request.headers.get('x-signature')
+    const hmacValid = validHmac(rawBody, signature, process.env.VAPI_WEBHOOK_SIGNING_SECRET || process.env.VAPI_WEBHOOK_SECRET)
+    const legacyHeader = request.headers.get('x-vapi-secret')
+    return hmacValid || (allowFallback && sharedValid) || (allowFallback && Boolean(sharedSecret && legacyHeader && safeEqual(legacyHeader, sharedSecret)))
+  }
+  if (provider === 'webchat') {
+    const publicKey = process.env.NEXT_PUBLIC_WEBCHAT_PUBLIC_KEY
+    const receivedKey = request.headers.get('x-webchat-public-key')
+    return Boolean(publicKey && receivedKey && safeEqual(receivedKey, publicKey)) || sharedValid
+  }
+  return sharedValid
+}
 
 function firstString(...values: unknown[]) {
   return values.find((value): value is string => typeof value === 'string' && value.length > 0) || null
@@ -191,14 +252,13 @@ export async function POST(request: Request, context: { params: { provider: stri
   const provider = context.params.provider.toLowerCase()
   if (!['vapi', 'telnyx', 'whatsapp', 'webchat'].includes(provider)) return NextResponse.json({ error: 'Provider non supportato' }, { status: 404 })
 
-  const expected = process.env.AI_WEBHOOK_SECRET
-  const receivedSecret = request.headers.get('x-prontoai-webhook-secret') || request.headers.get('x-vapi-secret') || request.headers.get('x-webhook-secret')
-  const receivedWebChatKey = request.headers.get('x-webchat-public-key')
-  const validWebChatKey = provider === 'webchat' && process.env.NEXT_PUBLIC_WEBCHAT_PUBLIC_KEY && receivedWebChatKey === process.env.NEXT_PUBLIC_WEBCHAT_PUBLIC_KEY
-  if (expected && receivedSecret !== expected && !validWebChatKey) return NextResponse.json({ error: 'Firma webhook non valida' }, { status: 401 })
+  const retryAfter = rateLimit(request, provider)
+  if (retryAfter) return NextResponse.json({ error: 'Webhook rate limit exceeded' }, { status: 429, headers: { 'Retry-After': String(retryAfter) } })
 
   try {
-    const payload = await request.json() as JsonObject
+    const rawBody = await request.text()
+    if (!authenticatedWebhook(provider, request, rawBody)) return NextResponse.json({ error: 'Firma webhook non valida' }, { status: 401 })
+    const payload = JSON.parse(rawBody) as JsonObject
     const adminClient = createAdminClient()
     if (provider === 'vapi') return handleVoice(payload, adminClient)
     if (provider === 'whatsapp' || provider === 'webchat') return handleMessaging(provider, payload, adminClient)

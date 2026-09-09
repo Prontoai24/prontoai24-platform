@@ -101,3 +101,28 @@ curl "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/messages?select=id,org_id,conversation_i
 Il server risponde `401` se il secret è errato, `200` con `ignored` se non riesce a risolvere il tenant, `200` con il riepilogo del messaggio se la persistenza è riuscita e `500` per errori infrastrutturali.
 
 I messaggi duplicati, identificati da `provider` e `provider_message_id`, vengono ignorati con risposta `duplicate: true`.
+
+## Firme HMAC in produzione
+
+Per WhatsApp/Meta, calcolare la firma sul body raw e inviare `X-Hub-Signature-256`:
+
+```bash
+BODY='{"org_id":"'$ORG_ID'","type":"whatsapp.message","message":{"id":"wa-hmac-001","from":"+393331112233","to":"+390212345678","text":{"body":"Messaggio firmato"}}}'
+SIGNATURE="sha256=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$WHATSAPP_APP_SECRET" -hex | sed 's/^.* //')"
+curl -i -X POST "$BASE_URL/api/webhooks/ai/whatsapp" \
+  -H 'content-type: application/json' \
+  -H "x-hub-signature-256: $SIGNATURE" \
+  --data "$BODY"
+```
+
+Per Vapi, il principio è analogo: la firma SHA-256 del body raw deve essere inviata nell’header `x-vapi-signature` usando `VAPI_WEBHOOK_SIGNING_SECRET`.
+
+```bash
+SIGNATURE=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$VAPI_WEBHOOK_SIGNING_SECRET" -hex | sed 's/^.* //')
+curl -i -X POST "$BASE_URL/api/webhooks/ai/vapi" \
+  -H 'content-type: application/json' \
+  -H "x-vapi-signature: $SIGNATURE" \
+  --data "$BODY"
+```
+
+Il fallback tramite `x-prontoai-webhook-secret` è intenzionalmente disabilitato quando `WEBHOOK_ALLOW_SHARED_SECRET_FALLBACK=false`.
