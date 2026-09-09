@@ -188,6 +188,19 @@ async function handleVoice(payload: JsonObject, adminClient: ReturnType<typeof c
 }
 
 async function handleMessaging(provider: 'whatsapp' | 'webchat', payload: JsonObject, adminClient: ReturnType<typeof createAdminClient>) {
+  const whatsappValue = payload.entry?.[0]?.changes?.[0]?.value as JsonObject | undefined
+  const whatsappMetadata = (whatsappValue?.metadata || {}) as JsonObject
+  const whatsappStatus = provider === 'whatsapp' ? (whatsappValue?.statuses?.[0] as JsonObject | undefined) : undefined
+  if (whatsappStatus?.id) {
+    const statusOrg = firstString(payload.org_id, whatsappMetadata.org_id)
+    let orgId = statusOrg
+    if (!orgId && whatsappMetadata.phone_number_id) {
+      const { data: mapped } = await adminClient.from('tenant_channel_settings').select('client_id').eq('whatsapp_config->>phone_number_id', String(whatsappMetadata.phone_number_id)).maybeSingle()
+      orgId = mapped?.client_id || null
+    }
+    if (orgId) await adminClient.from('messages').update({ status: firstString(whatsappStatus.status) || 'updated', metadata: { provider: 'meta', status: whatsappStatus } }).eq('provider', 'whatsapp').eq('provider_message_id', whatsappStatus.id).eq('org_id', orgId)
+    return NextResponse.json({ received: true, status: whatsappStatus.status || 'updated', org_id: orgId })
+  }
   const message = (provider === 'whatsapp'
     ? payload.entry?.[0]?.changes?.[0]?.value?.messages?.[0] || payload.message || payload.messages?.[0] || payload
     : payload.message || payload) as JsonObject
@@ -198,6 +211,11 @@ async function handleMessaging(provider: 'whatsapp' | 'webchat', payload: JsonOb
   const body = firstString(message.text?.body, message.text, message.body, message.content?.text, payload.text, payload.body) || ''
   const occurredAt = isoDate(message.timestamp || message.created_at || payload.timestamp) || new Date().toISOString()
 
+  const metaPhoneNumberId = firstString(whatsappMetadata.phone_number_id, message.metadata?.phone_number_id, payload.phone_number_id)
+  if (!orgId && provider === 'whatsapp' && metaPhoneNumberId) {
+    const { data: mapped } = await adminClient.from('tenant_channel_settings').select('client_id').eq('whatsapp_config->>phone_number_id', metaPhoneNumberId).maybeSingle()
+    orgId = mapped?.client_id || null
+  }
   if (!orgId && provider === 'whatsapp' && (recipient || sender)) {
     const phone = recipient || sender
     const { data: mapped } = await adminClient.from('phone_numbers').select('client_id').eq('phone_number', phone).maybeSingle()
