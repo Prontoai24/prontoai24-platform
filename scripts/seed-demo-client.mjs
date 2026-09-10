@@ -13,12 +13,12 @@ const admin = createClient(url, serviceRole, { auth: { autoRefreshToken: false, 
 const { data: existing } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
 const found = existing.users.find((user) => user.email?.toLowerCase() === email.toLowerCase())
 const authResult = found
-  ? await admin.auth.admin.updateUserById(found.id, { password, user_metadata: { role: 'client', must_change_password: true, demo_account: true } })
-  : await admin.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { role: 'client', must_change_password: true, demo_account: true } })
+  ? await admin.auth.admin.updateUserById(found.id, { password, user_metadata: { role: 'client', must_change_password: false, force_password_change: false, demo_account: true } })
+  : await admin.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { role: 'client', must_change_password: false, force_password_change: false, demo_account: true } })
 if (authResult.error || !authResult.data.user) throw authResult.error || new Error('Creazione utente fallita')
 const user = authResult.data.user
 
-const { error: profileError } = await admin.from('profiles').upsert({ id: user.id, email, role: 'client', full_name: companyName, must_change_password: true, status: 'active' }, { onConflict: 'id' })
+const { error: profileError } = await admin.from('profiles').upsert({ id: user.id, email, role: 'client', full_name: companyName, must_change_password: false, status: 'active' }, { onConflict: 'id' })
 if (profileError) throw profileError
 
 let { data: manager } = await admin.from('profiles').select('id').eq('role', 'super_admin').limit(1).maybeSingle()
