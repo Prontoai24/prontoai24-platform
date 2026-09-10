@@ -120,6 +120,24 @@ export const trackWhatsAppUsage = inngest.createFunction(
   }),
 )
 
+export const sendWhatsAppMessage = inngest.createFunction(
+  { id: 'send-whatsapp-message', name: 'Send WhatsApp message' },
+  { event: 'whatsapp/message.send.requested' },
+  async ({ event, step }) => step.run('send-and-persist-whatsapp-message', async () => {
+    const data = event.data as { org_id: string; to: string; body: string; conversation_id?: string }
+    if (!data.org_id || !data.to || !data.body) throw new Error('Evento WhatsApp incompleto')
+    const { sendWhatsAppText } = await import('@/lib/whatsapp')
+    const result = await sendWhatsAppText({ clientId: data.org_id, to: data.to, body: data.body })
+    const db = adminDb()
+    const conversationExternalId = data.conversation_id || `whatsapp:${data.to}`
+    const { data: conversation, error: conversationError } = await db.from('conversations').upsert({ org_id: data.org_id, conversation_id: conversationExternalId, channel: 'whatsapp', updated_at: new Date().toISOString() }, { onConflict: 'org_id,conversation_id' }).select('id').single()
+    if (conversationError || !conversation) throw conversationError || new Error('Conversazione WhatsApp outbound non creata')
+    const { error: messageError } = await db.from('messages').insert({ org_id: data.org_id, conversation_id: conversation.id, provider: 'whatsapp', provider_message_id: result.providerMessageId, direction: 'outbound', sender: null, recipient: data.to, body: data.body, status: 'sent', metadata: { provider: 'meta' }, occurred_at: new Date().toISOString() })
+    if (messageError) throw messageError
+    return { orgId: data.org_id, to: data.to, providerMessageId: result.providerMessageId }
+  }),
+)
+
 const PLAN_LIMITS: Record<string, number> = { free: 30, base: 200, pro: 1000, enterprise: 999999 }
 
 export const checkUsageLimits = inngest.createFunction(

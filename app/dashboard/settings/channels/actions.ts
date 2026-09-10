@@ -1,7 +1,7 @@
 'use server'
 
 import { createClient, createAdminClient } from '@/lib/supabase/server'
-import { encryptWhatsAppToken } from '@/lib/whatsapp/crypto'
+import { encryptWhatsAppToken } from '@/lib/whatsapp'
 
 export async function saveWhatsAppSettings(formData: FormData) {
   const supabase = createClient()
