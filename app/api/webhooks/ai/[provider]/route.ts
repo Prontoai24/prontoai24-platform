@@ -294,7 +294,8 @@ async function handleMessaging(provider: 'whatsapp' | 'webchat', payload: JsonOb
 }
 
 export async function POST(request: Request, context: { params: { provider: string } }) {
-  const provider = context.params.provider.toLowerCase()
+  const requestedProvider = context.params.provider.toLowerCase()
+  const provider = requestedProvider === 'meta' ? 'whatsapp' : requestedProvider
   if (!['vapi', 'telnyx', 'whatsapp', 'webchat'].includes(provider)) return NextResponse.json({ error: 'Provider non supportato' }, { status: 404 })
 
   const retryAfter = rateLimit(request, provider)
@@ -313,4 +314,15 @@ export async function POST(request: Request, context: { params: { provider: stri
     captureObservedException(error, 'default', { provider, endpoint: 'webhooks/ai' })
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Webhook processing failed' }, { status: 500 })
   }
+}
+
+export async function GET(request: Request, context: { params: { provider: string } }) {
+  const requestedProvider = context.params.provider.toLowerCase()
+  if (requestedProvider !== 'meta' && requestedProvider !== 'whatsapp') return NextResponse.json({ error: 'Provider non supportato' }, { status: 404 })
+  const url = new URL(request.url)
+  const mode = url.searchParams.get('hub.mode')
+  const verifyToken = url.searchParams.get('hub.verify_token')
+  const challenge = url.searchParams.get('hub.challenge')
+  if (mode === 'subscribe' && verifyToken && challenge && safeEqual(verifyToken, process.env.WHATSAPP_VERIFY_TOKEN || '')) return new Response(challenge, { status: 200 })
+  return NextResponse.json({ error: 'Webhook verification failed' }, { status: 403 })
 }
