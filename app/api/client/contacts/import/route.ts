@@ -10,14 +10,14 @@ export const dynamic = 'force-dynamic'
 const normalize = (value: unknown) => String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9àèéìòù]/g, '')
 const mapField = (key: string) => {
   const value = normalize(key)
-  if (['nome', 'firstname', 'name'].includes(value)) return 'first_name'
-  if (['cognome', 'lastname', 'surname'].includes(value)) return 'last_name'
-  if (['email', 'emailaddress', 'mail'].includes(value)) return 'email'
-  if (['telefono', 'phone', 'mobile', 'cellulare', 'whatsapp'].includes(value)) return 'phone'
+  if (['nome', 'firstname', 'name', 'nomecliente', 'nomecontatto'].includes(value)) return 'first_name'
+  if (['cognome', 'lastname', 'surname', 'cognomecliente', 'cognomecontatto'].includes(value)) return 'last_name'
+  if (['email', 'emailaddress', 'mail', 'emailcliente', 'emailcontatto'].includes(value)) return 'email'
+  if (['telefono', 'phone', 'mobile', 'cellulare', 'whatsapp', 'cellulareprincipale', 'numerotelefono'].includes(value)) return 'phone'
   if (['messenger', 'facebook'].includes(value)) return 'messenger'
   if (['instagram', 'ig'].includes(value)) return 'instagram'
   if (['note', 'notes', 'commenti'].includes(value)) return 'notes'
-  if (['stato', 'stage', 'status'].includes(value)) return 'stage'
+  if (['stato', 'stage', 'status', 'statocontatto'].includes(value)) return 'stage'
   return null
 }
 

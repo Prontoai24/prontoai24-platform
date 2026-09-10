@@ -193,7 +193,15 @@ async function handleVoice(payload: JsonObject, adminClient: ReturnType<typeof c
   if (event === 'end-of-call-report' || event === 'call.ended' || event === 'call-ended') {
     await inngest.send({ name: 'vapi/call.ended', data: { org_id: orgId, duration_seconds: duration, provider_call_id: providerCallId } })
   }
-  const ragSystemPrompt = transcript ? await buildKnowledgePrompt(orgId, transcript, 'Sei l’assistente vocale di ProntoAI24. Rispondi in italiano e usa solo informazioni verificate del tenant.') : null
+  let ragSystemPrompt: string | null = null
+  if (transcript) {
+    try {
+      ragSystemPrompt = await buildKnowledgePrompt(orgId, transcript, 'Sei l’assistente vocale di ProntoAI24. Rispondi in italiano e usa solo informazioni verificate del tenant.')
+    } catch (error) {
+      captureObservedException(error, orgId, { provider: 'vapi', event, feature: 'voice-rag-fallback' })
+      await adminClient.from('audit_logs').insert({ action: 'vapi.rag.fallback', entity_type: 'vapi', metadata: { orgId, providerCallId, conversationId, reason: error instanceof Error ? error.message : 'RAG unavailable' } })
+    }
+  }
   return NextResponse.json({ received: true, org_id: orgId, conversation_id: conversationId, event, rag_system_prompt: ragSystemPrompt })
 }
 
