@@ -1,10 +1,14 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 
 export const dynamic = 'force-dynamic'
 
-async function tenant() {
-  const supabase = createClient()
+async function tenant(request: Request) {
+  const authorization = request.headers.get('authorization')
+  const supabase = authorization
+    ? createSupabaseClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { global: { headers: { Authorization: authorization } } })
+    : createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { supabase, client: null, response: NextResponse.json({ error: 'Non autenticato' }, { status: 401 }) }
   const { data: client } = await supabase.from('clients').select('id').eq('profile_id', user.id).single()
@@ -13,7 +17,7 @@ async function tenant() {
 }
 
 export async function GET(request: Request) {
-  const { supabase, client, response } = await tenant(); if (response || !client) return response
+  const { supabase, client, response } = await tenant(request); if (response || !client) return response
   const url = new URL(request.url)
   const search = url.searchParams.get('search')?.trim()
   const listId = url.searchParams.get('listId')
@@ -28,11 +32,11 @@ export async function GET(request: Request) {
     const csv = [['Nome', 'Cognome', 'Email', 'Telefono', 'Messenger', 'Instagram', 'Stato', 'Note'], ...rows].map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(',')).join('\n')
     return new Response(`\ufeff${csv}`, { headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="prontoai24-contatti.csv"' } })
   }
-  return NextResponse.json({ contacts: contacts ?? [], lists: lists ?? [] })
+  return NextResponse.json({ clientId: client.id, contacts: contacts ?? [], lists: lists ?? [] })
 }
 
 export async function POST(request: Request) {
-  const { supabase, client, response } = await tenant(); if (response || !client) return response
+  const { supabase, client, response } = await tenant(request); if (response || !client) return response
   const body = await request.json() as Record<string, unknown>
   if (body.action === 'create-list') {
     const { data, error } = await supabase.from('contact_lists').insert({ client_id: client.id, name: body.name, description: body.description || null }).select('id, name, description').single()
@@ -45,7 +49,7 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const { supabase, client, response } = await tenant(); if (response || !client) return response
+  const { supabase, client, response } = await tenant(request); if (response || !client) return response
   const body = await request.json() as Record<string, unknown>
   const { id, ...changes } = body
   if (!id) return NextResponse.json({ error: 'ID contatto mancante' }, { status: 400 })
@@ -55,7 +59,7 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const { supabase, client, response } = await tenant(); if (response || !client) return response
+  const { supabase, client, response } = await tenant(request); if (response || !client) return response
   const id = new URL(request.url).searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'ID contatto mancante' }, { status: 400 })
   const { error } = await supabase.from('contacts').delete().eq('id', id).eq('client_id', client.id)

@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
-import pdfParse from 'pdf-parse'
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createSupabaseClient } from '@supabase/supabase-js'
+
+const pdfParse = require('pdf-parse') as (data: Buffer) => Promise<{ text: string }>
 
 export const dynamic = 'force-dynamic'
 
@@ -19,8 +21,11 @@ const mapField = (key: string) => {
   return null
 }
 
-async function getTenant() {
-  const supabase = createClient()
+async function getTenant(request: Request) {
+  const authorization = request.headers.get('authorization')
+  const supabase = authorization
+    ? createSupabaseClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { global: { headers: { Authorization: authorization } } })
+    : createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { supabase, client: null }
   const { data: client } = await supabase.from('clients').select('id').eq('profile_id', user.id).single()
@@ -28,7 +33,7 @@ async function getTenant() {
 }
 
 export async function POST(request: Request) {
-  const { supabase, client } = await getTenant()
+  const { supabase, client } = await getTenant(request)
   if (!client) return NextResponse.json({ error: 'Non autenticato o tenant non trovato' }, { status: 401 })
   const form = await request.formData()
   const file = form.get('file')

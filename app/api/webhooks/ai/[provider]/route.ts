@@ -149,6 +149,15 @@ async function handleVoice(payload: JsonObject, adminClient: ReturnType<typeof c
   const startedAt = isoDate(call.startedAt || call.started_at || message.startedAt)
   const endedAt = isoDate(call.endedAt || call.ended_at || message.endedAt)
   const endedReason = firstString(message.endedReason, call.endedReason, call.ended_reason)
+  const fromNumber = firstString(call.customer?.number, call.from_number)
+  const toNumber = firstString(phone.number, call.to_number)
+  let contactId: string | null = null
+  const phoneCandidates = [fromNumber, toNumber].filter(Boolean) as string[]
+  if (phoneCandidates.length) {
+    const phoneFilter = phoneCandidates.map((number) => `phone.eq.${number.replaceAll(',', '')}`).join(',')
+    const { data: matchedContact } = await adminClient.from('contacts').select('id').eq('client_id', orgId).or(phoneFilter).limit(1).maybeSingle()
+    contactId = matchedContact?.id || null
+  }
 
   const { data: existing } = await adminClient.from('calls').select('id').eq('org_id', orgId).eq('provider_call_id', providerCallId).maybeSingle()
   const callRecord = {
@@ -160,8 +169,9 @@ async function handleVoice(payload: JsonObject, adminClient: ReturnType<typeof c
     started_at: startedAt,
     ended_at: endedAt,
     direction: firstString(call.direction) || 'inbound',
-    from_number: firstString(call.customer?.number, call.from_number),
-    to_number: firstString(phone.number, call.to_number),
+    from_number: fromNumber,
+    to_number: toNumber,
+    contact_id: contactId,
     status: event,
     ended_reason: endedReason,
     updated_at: new Date().toISOString(),
@@ -173,7 +183,7 @@ async function handleVoice(payload: JsonObject, adminClient: ReturnType<typeof c
   if (transcript || event === 'transcript' || event === 'end-of-call-report') {
     const { data: conversation } = await adminClient.from('conversations').select('transcript').eq('org_id', orgId).eq('conversation_id', conversationId).maybeSingle()
     const mergedTranscript = transcript || conversation?.transcript || null
-    const { error: conversationError } = await adminClient.from('conversations').upsert({ org_id: orgId, conversation_id: conversationId, channel: 'voice', transcript: mergedTranscript, updated_at: new Date().toISOString() }, { onConflict: 'org_id,conversation_id' })
+    const { error: conversationError } = await adminClient.from('conversations').upsert({ org_id: orgId, conversation_id: conversationId, channel: 'voice', contact_id: contactId, transcript: mergedTranscript, updated_at: new Date().toISOString() }, { onConflict: 'org_id,conversation_id' })
     if (conversationError) throw conversationError
   }
 
