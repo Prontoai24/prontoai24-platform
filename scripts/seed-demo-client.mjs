@@ -18,14 +18,18 @@ const authResult = found
 if (authResult.error || !authResult.data.user) throw authResult.error || new Error('Creazione utente fallita')
 const user = authResult.data.user
 
-const { error: profileError } = await admin.from('profiles').upsert({ id: user.id, role: 'client', full_name: companyName, must_change_password: true, status: 'active' }, { onConflict: 'id' })
+const { error: profileError } = await admin.from('profiles').upsert({ id: user.id, email, role: 'client', full_name: companyName, must_change_password: true, status: 'active' }, { onConflict: 'id' })
 if (profileError) throw profileError
 
 let { data: manager } = await admin.from('profiles').select('id').eq('role', 'super_admin').limit(1).maybeSingle()
 if (!manager) ({ data: manager } = await admin.from('profiles').select('id').eq('role', 'admin').limit(1).maybeSingle())
 if (!manager) throw new Error('Nessun profilo admin/super_admin disponibile per managed_by_admin')
 
-const { data: client, error: clientError } = await admin.from('clients').upsert({ profile_id: user.id, company_name: companyName, managed_by_admin: manager.id, status: 'active' }, { onConflict: 'profile_id' }).select('id').single()
+const { data: existingClient } = await admin.from('clients').select('id').eq('profile_id', user.id).maybeSingle()
+const clientMutation = existingClient
+  ? await admin.from('clients').update({ company_name: companyName, contact_email: email, managed_by_admin: manager.id, status: 'active' }).eq('id', existingClient.id).select('id').single()
+  : await admin.from('clients').insert({ profile_id: user.id, company_name: companyName, contact_email: email, managed_by_admin: manager.id, status: 'active' }).select('id').single()
+const { data: client, error: clientError } = clientMutation
 if (clientError || !client) throw clientError || new Error('Creazione tenant demo fallita')
 
 const examples = [
