@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/server'
+import { decryptWhatsAppToken } from '@/lib/whatsapp/crypto'
 
 type WhatsAppConfig = {
   provider?: 'meta'
@@ -15,11 +16,12 @@ function configValue(config: WhatsAppConfig, key: keyof WhatsAppConfig, fallback
 
 export async function getWhatsAppConfig(clientId: string): Promise<Required<Pick<WhatsAppConfig, 'access_token' | 'phone_number_id'>> & WhatsAppConfig> {
   const admin = createAdminClient()
-  const { data, error } = await admin.from('tenant_channel_settings').select('whatsapp_config').eq('client_id', clientId).maybeSingle()
+  const { data, error } = await admin.from('tenant_channel_settings').select('provider, whatsapp_phone_number_id, whatsapp_waba_id, whatsapp_access_token, is_active, whatsapp_config').eq('org_id', clientId).eq('provider', 'meta').eq('is_active', true).maybeSingle()
   if (error) throw new Error(`Configurazione WhatsApp non leggibile: ${error.message}`)
-  const tenantConfig = (data?.whatsapp_config || {}) as WhatsAppConfig
-  const accessToken = configValue(tenantConfig, 'access_token', process.env.WHATSAPP_ACCESS_TOKEN)
-  const phoneNumberId = configValue(tenantConfig, 'phone_number_id', process.env.WHATSAPP_PHONE_NUMBER_ID)
+  const legacyConfig = (data?.whatsapp_config || {}) as WhatsAppConfig
+  const tenantConfig: WhatsAppConfig = { ...legacyConfig, phone_number_id: data?.whatsapp_phone_number_id || legacyConfig.phone_number_id }
+  const accessToken = data?.whatsapp_access_token ? decryptWhatsAppToken(data.whatsapp_access_token) : ''
+  const phoneNumberId = configValue(tenantConfig, 'phone_number_id')
   if (!accessToken || !phoneNumberId) throw new Error('WhatsApp Meta non configurato: servono access token e phone number ID')
   return { ...tenantConfig, access_token: accessToken, phone_number_id: phoneNumberId }
 }

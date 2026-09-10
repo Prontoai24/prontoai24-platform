@@ -195,8 +195,8 @@ async function handleMessaging(provider: 'whatsapp' | 'webchat', payload: JsonOb
     const statusOrg = firstString(payload.org_id, whatsappMetadata.org_id)
     let orgId = statusOrg
     if (!orgId && whatsappMetadata.phone_number_id) {
-      const { data: mapped } = await adminClient.from('tenant_channel_settings').select('client_id').eq('whatsapp_config->>phone_number_id', String(whatsappMetadata.phone_number_id)).maybeSingle()
-      orgId = mapped?.client_id || null
+      const { data: mapped } = await adminClient.from('tenant_channel_settings').select('org_id').eq('provider', 'meta').eq('whatsapp_phone_number_id', String(whatsappMetadata.phone_number_id)).eq('is_active', true).maybeSingle()
+      orgId = mapped?.org_id || null
     }
     if (orgId) await adminClient.from('messages').update({ status: firstString(whatsappStatus.status) || 'updated', metadata: { provider: 'meta', status: whatsappStatus } }).eq('provider', 'whatsapp').eq('provider_message_id', whatsappStatus.id).eq('org_id', orgId)
     return NextResponse.json({ received: true, status: whatsappStatus.status || 'updated', org_id: orgId })
@@ -213,8 +213,8 @@ async function handleMessaging(provider: 'whatsapp' | 'webchat', payload: JsonOb
 
   const metaPhoneNumberId = firstString(whatsappMetadata.phone_number_id, message.metadata?.phone_number_id, payload.phone_number_id)
   if (!orgId && provider === 'whatsapp' && metaPhoneNumberId) {
-    const { data: mapped } = await adminClient.from('tenant_channel_settings').select('client_id').eq('whatsapp_config->>phone_number_id', metaPhoneNumberId).maybeSingle()
-    orgId = mapped?.client_id || null
+    const { data: mapped } = await adminClient.from('tenant_channel_settings').select('org_id').eq('provider', 'meta').eq('whatsapp_phone_number_id', metaPhoneNumberId).eq('is_active', true).maybeSingle()
+    orgId = mapped?.org_id || null
   }
   if (!orgId && provider === 'whatsapp' && (recipient || sender)) {
     const phone = recipient || sender
