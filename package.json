@@ -15,7 +15,8 @@
     "test:contacts-realtime": "node --env-file=.env.local scripts/test-contacts-realtime.mjs",
     "test:knowledge-rag": "env -u OPENAI_API_KEY -u FIRECRAWL_API_KEY node --env-file=.env.local scripts/test-knowledge-rag-e2e.mjs",
     "test:demo-account": "node --env-file=.env.local scripts/verify-demo-account.mjs",
-    "test:inbound-vapi-contact": "node --env-file=.env.local scripts/test-inbound-vapi-contact.mjs"
+    "test:inbound-vapi-contact": "node --env-file=.env.local scripts/test-inbound-vapi-contact.mjs",
+    "test:kanban-vapi-load": "node --env-file=.env.local scripts/test-kanban-load-vapi.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0",
