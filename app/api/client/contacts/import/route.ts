@@ -3,9 +3,9 @@ import * as XLSX from 'xlsx'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 
-const pdfParse = require('pdf-parse') as (data: Buffer) => Promise<{ text: string }>
-
 export const dynamic = 'force-dynamic'
+
+const pdfParse = require('pdf-parse/lib/pdf-parse.js') as (data: Buffer) => Promise<{ text: string }>
 
 const normalize = (value: unknown) => String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9àèéìòù]/g, '')
 const mapField = (key: string) => {
@@ -45,7 +45,8 @@ export async function POST(request: Request) {
   try {
     if (extension === 'pdf') {
       const parsed = await pdfParse(buffer)
-      rows = parsed.text.split(/\r?\n/).map((line) => line.split(/[;,\t|]/)).filter((parts) => parts.length >= 2 && parts.some(Boolean)).map((parts) => ({ first_name: parts[0], last_name: parts[1], email: parts[2], phone: parts[3], notes: parts.slice(4).join(' ') }))
+      const text = parsed.text
+      rows = text.split(/\r?\n/).map((line) => line.split(/[;,\t|]/)).filter((parts) => parts.length >= 4 && parts.some(Boolean) && (String(parts[2]).includes('@') || /\+?\d[\d\s-]{6,}/.test(String(parts[3])))).map((parts) => ({ first_name: parts[0], last_name: parts[1], email: parts[2], phone: parts[3], notes: parts.slice(4).join(' ') }))
     } else {
       const workbook = XLSX.read(buffer, { type: 'buffer' })
       const sheet = workbook.Sheets[workbook.SheetNames[0]]

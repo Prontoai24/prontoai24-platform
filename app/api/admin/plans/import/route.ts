@@ -3,7 +3,7 @@ import { createClient, createAdminClient } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
 
-const pdfParse = require('pdf-parse') as (data: Buffer) => Promise<{ text: string }>
+const pdfParse = require('pdf-parse/lib/pdf-parse.js') as (data: Buffer) => Promise<{ text: string }>
 const tiers = ['base', 'evoluto', 'enterprise'] as const
 const minutes = [150, 300, 500, 1000, 2000, 4000, 7000, 10000]
 const billingCycles = ['trimestrale', 'annuale'] as const
